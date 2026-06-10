@@ -1,0 +1,13 @@
+llm_provider: ollama
+transcriber: macos_say_timeline
+editor: davinci_resolve
+content_policy: original_authorized
+default_language: zh-CN
+target_duration_minutes: 8-15
+default_voice: Tingting
+subtitle:
+  max_chars_per_line: 28
+  chars_per_second: 4.8
+assets:
+  allow_custom_bgm: true
+  allow_custom_images: true

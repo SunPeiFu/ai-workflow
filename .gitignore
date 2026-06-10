@@ -1,0 +1,54 @@
+.DS_Store
+Thumbs.db
+
+# Python cache / test cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtual environments and package caches
+.venv/
+venv/
+env/
+.uv/
+node_modules/
+
+# Local runtime logs
+*.log
+logs/
+
+# Generated user content, uploads, media, and export packages
+inputs/
+projects/
+remix_packages/
+uploads/
+
+# Generated media files anywhere in the tree
+*.mp4
+*.mov
+*.m4v
+*.avi
+*.mkv
+*.wav
+*.aiff
+*.mp3
+*.m4a
+*.flac
+*.aac
+*.zip
+
+# Large/generated image outputs. Keep source UI assets explicitly allowed below.
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+!web/default-cover.ppm
+
+# Local editor files
+.idea/
+.vscode/
+*.swp
+*.swo

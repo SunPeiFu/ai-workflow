@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>链接素材拆解</title>
+    <link rel="stylesheet" href="/app.css?v=20260610-image-fit" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace remix-workspace">
+        <header class="topbar">
+          <div class="topbar-title">
+            <span class="product-badge">AI Content Studio</span>
+            <h1>链接素材拆解</h1>
+            <p>基于抖音、快手、小红书公开链接拆解文案与素材，生成原创图文包/视频包</p>
+          </div>
+          <div class="topbar-actions">
+            <a class="nav-link" href="/">工作台</a>
+          </div>
+        </header>
+
+        <nav class="remix-tabs" aria-label="素材工作流" role="tablist">
+          <button class="remix-tab-btn is-active" type="button" data-remix-tab="extract" role="tab" aria-selected="true">素材拆解</button>
+          <button class="remix-tab-btn" type="button" data-remix-tab="jianying" role="tab" aria-selected="false">剪映视频</button>
+          <button class="remix-tab-btn" type="button" data-remix-tab="xiaohongshu" role="tab" aria-selected="false">小红书图文</button>
+        </nav>
+
+        <div class="remix-tab-panel is-active" data-remix-panel="extract" role="tabpanel">
+        <div class="remix-grid">
+          <section class="panel remix-input-panel">
+            <div class="panel-head">
+              <h2>链接输入</h2>
+              <span class="status-pill" id="remixStatus">Ready</span>
+            </div>
+
+            <label>
+              短视频链接或分享文字
+              <textarea id="sourceUrl" class="small-textarea" placeholder="可直接粘贴抖音 / 快手 / 小红书链接，也支持整段分享文字"></textarea>
+            </label>
+
+            <div class="actions">
+              <button id="analyzeBtn">拆解链接</button>
+              <button id="xiaohongshuFlowBtn" class="secondary" type="button" disabled>小红书图文生成</button>
+              <button id="jianyingFlowBtn" class="secondary" type="button" disabled>剪映视频生成</button>
+            </div>
+          </section>
+
+          <section class="panel remix-output-panel">
+            <div class="panel-head">
+              <h2>文案模块</h2>
+              <div class="copy-actions">
+                <label class="rewrite-model-control">
+                  <span>润色模型</span>
+                  <select id="rewriteModelSelect">
+                    <option value="">加载模型中...</option>
+                  </select>
+                </label>
+                <button id="copyAllBtn" class="text-btn" disabled>复制全部</button>
+              </div>
+            </div>
+
+            <div class="copy-block">
+              <div class="copy-block-head">
+                <strong>标题</strong>
+                <div class="copy-actions">
+                  <button class="text-btn" data-copy-target="titleText">复制</button>
+                  <button class="text-btn emoji-toggle-btn" data-emoji-target="title" aria-pressed="false">加入 emoji</button>
+                  <button class="text-btn" data-optimize-target="title">优化润色</button>
+                </div>
+              </div>
+              <pre id="titleText">等待拆解</pre>
+              <div id="titleRewritePanel" class="rewrite-panel is-hidden">
+                <div class="panel-head">
+                  <h3 id="titleRewriteTitle">标题优化候选</h3>
+                  <button class="secondary" type="button" data-apply-rewrite="title" disabled>确认回填</button>
+                </div>
+                <div id="titleRewriteOptions" class="rewrite-options"></div>
+              </div>
+            </div>
+            <div class="copy-block">
+              <div class="copy-block-head">
+                <strong>正文</strong>
+                <div class="copy-actions">
+                  <button class="text-btn" data-copy-target="bodyText">复制</button>
+                  <button class="text-btn emoji-toggle-btn" data-emoji-target="body" aria-pressed="false">加入 emoji</button>
+                  <button class="text-btn" data-optimize-target="body">优化润色</button>
+                </div>
+              </div>
+              <pre id="bodyText">等待拆解</pre>
+              <div id="bodyRewritePanel" class="rewrite-panel is-hidden">
+                <div class="panel-head">
+                  <h3 id="bodyRewriteTitle">正文优化候选</h3>
+                  <button class="secondary" type="button" data-apply-rewrite="body" disabled>确认回填</button>
+                </div>
+                <div id="bodyRewriteOptions" class="rewrite-options"></div>
+              </div>
+            </div>
+            <div class="copy-block">
+              <div class="copy-block-head">
+                <strong>标签</strong>
+                <div class="copy-actions">
+                  <button class="text-btn" data-copy-target="tagsText">复制</button>
+                  <button class="text-btn" data-optimize-target="tags">优化润色</button>
+                </div>
+              </div>
+              <pre id="tagsText">等待拆解</pre>
+              <div id="tagsRewritePanel" class="rewrite-panel is-hidden">
+                <div class="panel-head">
+                  <h3 id="tagsRewriteTitle">标签优化候选</h3>
+                  <button class="secondary" type="button" data-apply-rewrite="tags" disabled>确认回填</button>
+                </div>
+                <div id="tagsRewriteOptions" class="rewrite-options"></div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="panel remix-image-panel">
+            <div class="panel-head">
+              <h2>图片模块</h2>
+              <div class="copy-actions">
+                <input id="imageUploadInput" type="file" accept="image/*" multiple hidden />
+                <button id="uploadImagesBtn" class="text-btn" type="button">图片上传</button>
+                <button id="aiPolishImagesBtn" class="text-btn" type="button" disabled>AI润色</button>
+                <button id="deleteImagesBtn" class="text-btn danger-text-btn" type="button" disabled>删除</button>
+              </div>
+            </div>
+            <div id="imageList" class="remix-image-list">等待拆解</div>
+            <div class="image-polish-panel">
+              <label for="imagePolishPrompt">AI 润色提示词</label>
+              <textarea id="imagePolishPrompt" rows="3" placeholder="例如：生成小红书产品宣传图，保留商品主体和包装信息，改成清爽厨房台面/运动场景/桌面开箱背景，摄影级灯光，画面适合带货封面"></textarea>
+              <div id="imagePolishStatus" class="image-polish-status">选中图片后，可填写提示词进行 AI 润色。</div>
+            </div>
+          </aside>
+
+        </div>
+        </div>
+
+        <div class="remix-tab-panel" data-remix-panel="jianying" role="tabpanel" hidden>
+        <div class="remix-grid">
+          <section class="panel jianying-panel">
+            <div class="panel-head">
+              <h2>剪映视频生成</h2>
+              <div class="copy-actions">
+                <button id="jianyingBtn" class="secondary" disabled>生成剪映包</button>
+                <button id="affiliateJianyingBtn" class="secondary" type="button" disabled>生成剪映工作包</button>
+              </div>
+            </div>
+            <label class="launch-jianying">
+              <input id="launchJianying" type="checkbox" />
+              生成剪映包后尝试打开本机剪映
+            </label>
+            <p class="tab-helper">剪映视频链路用于生成剪映包、带货剪映工作包，并通过本机剪映 App 做视频生成和后续精修。</p>
+          </section>
+
+          <section class="panel affiliate-panel">
+            <div class="panel-head">
+              <h2>带货二创模块</h2>
+              <div class="copy-actions">
+                <button id="affiliatePlanBtn" class="secondary" type="button" disabled>生成带货二创方案</button>
+              </div>
+            </div>
+            <div class="affiliate-form">
+              <label>
+                商品名称
+                <input id="affiliateProductName" placeholder="例如：速干运动短裤" />
+              </label>
+              <label>
+                商品类目
+                <input id="affiliateProductCategory" placeholder="例如：运动服饰 / 厨房用品 / 家居日用" />
+              </label>
+              <label>
+                核心卖点
+                <input id="affiliateSellingPoints" placeholder="例如：速干,百搭,打球训练" />
+              </label>
+              <label>
+                痛点场景
+                <input id="affiliatePainPoint" placeholder="例如：打球训练容易出汗，普通短裤闷" />
+              </label>
+            </div>
+            <div id="affiliatePlanResult" class="affiliate-result">先拆解链接，再生成抖音/小红书二创方案。</div>
+          </section>
+
+          <section class="panel package-history-panel" data-history-scope="jianying">
+            <div class="panel-head">
+              <h2>剪映素材历史</h2>
+              <button class="text-btn refresh-packages-btn" type="button">刷新列表</button>
+            </div>
+            <div class="package-history-layout">
+              <div id="jianyingHistoryList" class="package-history-list">正在加载历史内容...</div>
+              <div class="package-editor">
+                <div id="jianyingContentDetail" class="package-content-detail">选择左侧内容查看详情。</div>
+                <div class="panel-head">
+                  <h3 id="jianyingEditorTitle">文件编辑</h3>
+                  <button id="jianyingSaveFileBtn" class="secondary save-package-file-btn" type="button" disabled>保存修改</button>
+                </div>
+                <textarea id="jianyingFileEditor" class="package-file-editor" placeholder="选择左侧文本文件后可编辑"></textarea>
+              </div>
+            </div>
+          </section>
+        </div>
+        </div>
+
+        <div class="remix-tab-panel" data-remix-panel="xiaohongshu" role="tabpanel" hidden>
+        <div class="remix-grid">
+          <section class="panel xiaohongshu-panel">
+            <div class="panel-head">
+              <h2>小红书图文生成</h2>
+            </div>
+            <p class="tab-helper">小红书链路基于已有素材包生成带货图文笔记、图片分镜和发布清单，并可唤起本机小红书 App 准备发布草稿。</p>
+          </section>
+
+          <section class="panel package-history-panel" data-history-scope="xiaohongshu">
+            <div class="panel-head">
+              <h2>小红书图文历史</h2>
+            </div>
+            <div class="package-history-layout xiaohongshu-history-layout">
+              <div id="xiaohongshuHistoryList" class="package-history-list xiaohongshu-history-list">正在加载历史内容...</div>
+              <div id="xiaohongshuHistoryPager" class="package-pagination"></div>
+            </div>
+          </section>
+        </div>
+        </div>
+      </section>
+    </main>
+    <div id="imageLightbox" class="image-lightbox is-hidden" role="dialog" aria-modal="true" aria-label="图片预览">
+      <button id="imageLightboxClose" class="image-lightbox-close" type="button" title="关闭">×</button>
+      <button id="imageLightboxPrev" class="image-lightbox-nav image-lightbox-prev" type="button" title="上一张">‹</button>
+      <img id="imageLightboxImg" alt="放大图片预览" />
+      <button id="imageLightboxNext" class="image-lightbox-nav image-lightbox-next" type="button" title="下一张">›</button>
+      <div id="imageLightboxCounter" class="image-lightbox-counter">0 / 0</div>
+    </div>
+    <script src="/remix.js?v=20260610-image-fit"></script>
+  </body>
+</html>

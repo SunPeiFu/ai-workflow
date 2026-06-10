@@ -66,6 +66,7 @@ TARGET_VIDEO_BITRATE = "6000k"
 TARGET_AUDIO_BITRATE = "160k"
 TARGET_AUDIO_RATE = "44100"
 REMIX_EDITABLE_SUFFIXES = {".txt", ".md", ".json", ".csv", ".srt", ".yaml", ".yml"}
+DEFAULT_COMFYUI_URL = "http://127.0.0.1:8188"
 
 
 def create_project_from_payload(root: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -197,6 +198,48 @@ def polish_remix_images_with_codex(root: Path, payload: Dict[str, Any]) -> Dict[
             "stdout": stdout[-1000:],
         }
     return codex_polish_success_payload(root, request_dir, prompt, output_images, timed_out=False)
+
+
+def polish_remix_images_locally(root: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw_images = payload.get("images") or []
+    images = [str(item.get("path") or item.get("url") or item) if isinstance(item, dict) else str(item) for item in raw_images]
+    images = [image.strip() for image in images if image and image.strip()]
+    prompt = str(payload.get("prompt") or "").strip()
+    if not images:
+        return {"ok": False, "error": "请选择需要 AI 润色的图片"}
+    if not prompt:
+        return {"ok": False, "error": "请先填写图片 AI 润色提示词"}
+
+    comfyui_url = str(payload.get("comfyui_url") or DEFAULT_COMFYUI_URL).rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{comfyui_url}/system_stats", timeout=2) as response:
+            response.read(1)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "engine": "local",
+            "error": f"本地润色需要先启动 ComfyUI 服务: {comfyui_url}。当前无法连接: {exc}",
+        }
+
+    workflow_path = Path(str(payload.get("workflow_path") or root / "workflow.local-image-polish.json")).expanduser()
+    if not workflow_path.is_absolute():
+        workflow_path = (root / workflow_path).resolve()
+    if not workflow_path.exists():
+        return {
+            "ok": False,
+            "engine": "local",
+            "error": "本地 ComfyUI 已可连接，但还没有配置图片润色工作流文件 workflow.local-image-polish.json。",
+            "comfyui_url": comfyui_url,
+            "workflow_path": str(workflow_path),
+        }
+
+    return {
+        "ok": False,
+        "engine": "local",
+        "error": "本地 ComfyUI 图片润色工作流入口已接入，下一步需要把 ComfyUI 工作流 JSON 映射为可执行队列。",
+        "comfyui_url": comfyui_url,
+        "workflow_path": str(workflow_path),
+    }
 
 
 def decode_subprocess_output(value: Any) -> str:
@@ -2719,6 +2762,9 @@ def _make_handler(root: Path):
                     return
                 if path == "/api/remix/images/polish":
                     self._json(polish_remix_images_with_codex(root, payload))
+                    return
+                if path == "/api/remix/images/polish-local":
+                    self._json(polish_remix_images_locally(root, payload))
                     return
                 if path == "/api/remix/affiliate-plan":
                     self._json(create_affiliate_remix_plan(payload.get("analysis") or payload, payload))

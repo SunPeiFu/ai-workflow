@@ -1189,15 +1189,17 @@ function updateImageActionState() {
 async function polishSelectedImages() {
   const images = selectedImageObjects();
   const prompt = $("imagePolishPrompt").value.trim();
+  const engine = $("imagePolishEngine")?.value || "codex";
   if (!images.length) throw new Error("请先选择需要 AI 润色的图片");
   if (!prompt) throw new Error("请先填写图片 AI 润色提示词");
   const button = $("aiPolishImagesBtn");
   const progress = startManualButtonProgress(button);
   try {
-    setImagePolishStatus("正在发送图片和提示词给 Codex 客户端...");
+    const isLocal = engine === "local";
+    setImagePolishStatus(isLocal ? "正在发送图片和提示词给本地 ComfyUI..." : "正在发送图片和提示词给 Codex 客户端...");
     setRemixStatus("图片 AI 润色中", "busy");
     progress.update(18);
-    const data = await api("/api/remix/images/polish", {
+    const data = await api(isLocal ? "/api/remix/images/polish-local" : "/api/remix/images/polish", {
       method: "POST",
       body: JSON.stringify({ images, prompt }),
     });
@@ -1428,6 +1430,10 @@ bind("aiPolishImagesBtn", async () => {
 bind("affiliatePlanBtn", createAffiliatePlan);
 bind("affiliateJianyingBtn", createAffiliateJianyingPackage);
 $("imagePolishPrompt").addEventListener("input", updateImageActionState);
+$("imagePolishEngine").addEventListener("change", () => {
+  const engine = $("imagePolishEngine").value;
+  setImagePolishStatus(engine === "local" ? "本地润色会调用本机 ComfyUI 服务。" : "Codex 润色会调用 Codex 客户端。");
+});
 $("imageUploadInput").addEventListener("change", async (event) => {
   try {
     await handleImageUpload(event);

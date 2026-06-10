@@ -33,6 +33,7 @@ from workflow.web_app import (
     read_remix_package_file,
     preview_project,
     parse_byte_range,
+    polish_remix_images_locally,
     polish_remix_images_with_codex,
     save_uploaded_files,
     save_title_experiments,
@@ -1129,6 +1130,21 @@ class WebAppTest(unittest.TestCase):
             self.assertIn("请选择", missing_images["error"])
             self.assertFalse(missing_prompt["ok"])
             self.assertIn("提示词", missing_prompt["error"])
+
+    def test_polish_remix_images_locally_checks_comfyui_availability(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            with patch("workflow.web_app.urllib.request.urlopen", side_effect=OSError("refused")):
+                result = polish_remix_images_locally(
+                    root,
+                    {"images": ["/tmp/a.png"], "prompt": "生成小红书产品宣传图"},
+                )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["engine"], "local")
+            self.assertIn("ComfyUI", result["error"])
+            self.assertIn("127.0.0.1:8188", result["error"])
 
     def test_reference_voice_preset_maps_to_local_tts_engine(self):
         with tempfile.TemporaryDirectory() as tmp:

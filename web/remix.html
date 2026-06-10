@@ -127,6 +127,11 @@
             </div>
             <div id="imageList" class="remix-image-list">等待拆解</div>
             <div class="image-polish-panel">
+              <label for="imagePolishEngine">润色方式</label>
+              <select id="imagePolishEngine">
+                <option value="codex">Codex 润色</option>
+                <option value="local">本地润色</option>
+              </select>
               <label for="imagePolishPrompt">AI 润色提示词</label>
               <textarea id="imagePolishPrompt" rows="3" placeholder="例如：生成小红书产品宣传图，保留商品主体和包装信息，改成清爽厨房台面/运动场景/桌面开箱背景，摄影级灯光，画面适合带货封面"></textarea>
               <div id="imagePolishStatus" class="image-polish-status">选中图片后，可填写提示词进行 AI 润色。</div>
@@ -230,6 +235,6 @@
       <button id="imageLightboxNext" class="image-lightbox-nav image-lightbox-next" type="button" title="下一张">›</button>
       <div id="imageLightboxCounter" class="image-lightbox-counter">0 / 0</div>
     </div>
-    <script src="/remix.js?v=20260610-image-fit"></script>
+    <script src="/remix.js?v=20260610-local-polish"></script>
   </body>
 </html>

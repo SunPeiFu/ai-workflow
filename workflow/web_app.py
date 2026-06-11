@@ -184,11 +184,7 @@ def polish_remix_images_with_codex(root: Path, payload: Dict[str, Any]) -> Dict[
             "stderr": stderr[-1000:],
         }
     if returncode != 0:
-        return {
-            "ok": False,
-            "error": f"Codex 图片润色失败: {(stderr or stdout).strip()[:500]}",
-            "request_dir": str(request_dir),
-        }
+        return codex_polish_failure_payload(request_dir, stdout, stderr)
 
     if not output_images:
         return {
@@ -248,6 +244,35 @@ def decode_subprocess_output(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="ignore")
     return str(value)
+
+
+def codex_polish_failure_payload(request_dir: Path, stdout: str, stderr: str) -> Dict[str, Any]:
+    combined = "\n".join(part for part in [stderr, stdout] if part).strip()
+    tail = combined[-1600:] if combined else ""
+    lowered = combined.lower()
+    if "stream disconnected" in lowered or "error sending request" in lowered or "responses_retry" in lowered:
+        return {
+            "ok": False,
+            "error": "Codex 图片润色网络连接中断，未生成图片。请稍后重试，或切换为“本地润色”使用 ComfyUI。",
+            "request_dir": str(request_dir),
+            "retryable": True,
+            "stderr": tail,
+        }
+    if "no prompt provided" in lowered:
+        return {
+            "ok": False,
+            "error": "Codex 图片润色失败：Codex CLI 没有收到提示词输入，请重试。",
+            "request_dir": str(request_dir),
+            "retryable": True,
+            "stderr": tail,
+        }
+    summary = tail or combined[:500] or "未知错误"
+    return {
+        "ok": False,
+        "error": f"Codex 图片润色失败: {summary}",
+        "request_dir": str(request_dir),
+        "stderr": tail,
+    }
 
 
 def codex_polish_output_images(output_dir: Path) -> List[Path]:

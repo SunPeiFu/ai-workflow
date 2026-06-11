@@ -33,6 +33,7 @@ from workflow.web_app import (
     read_remix_package_file,
     preview_project,
     parse_byte_range,
+    codex_polish_failure_payload,
     polish_remix_images_locally,
     polish_remix_images_with_codex,
     save_uploaded_files,
@@ -1145,6 +1146,23 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(result["engine"], "local")
             self.assertIn("ComfyUI", result["error"])
             self.assertIn("127.0.0.1:8188", result["error"])
+
+    def test_codex_polish_failure_payload_reports_stream_disconnect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            request_dir = Path(tmp) / "codex-image-polish"
+            stderr = (
+                "Reading prompt from stdin...\n"
+                "OpenAI Codex v0.137.0-alpha.4\n"
+                "ERROR: stream disconnected before completion: error sending request for url "
+                "(https://chatgpt.com/backend-api/codex/responses)"
+            )
+
+            result = codex_polish_failure_payload(request_dir, "", stderr)
+
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["retryable"])
+            self.assertIn("网络连接中断", result["error"])
+            self.assertNotIn("Reading prompt from stdin", result["error"])
 
     def test_reference_voice_preset_maps_to_local_tts_engine(self):
         with tempfile.TemporaryDirectory() as tmp:

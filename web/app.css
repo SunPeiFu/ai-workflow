@@ -2778,18 +2778,21 @@ pre {
 }
 
 .remix-tab-panel[data-remix-panel="jianying"],
-.remix-tab-panel[data-remix-panel="xiaohongshu"] {
+.remix-tab-panel[data-remix-panel="xiaohongshu"],
+.remix-tab-panel[data-remix-panel="douyin"] {
   padding: 24px 24px 96px;
 }
 
 .remix-tab-panel[data-remix-panel="jianying"] .remix-grid,
-.remix-tab-panel[data-remix-panel="xiaohongshu"] .remix-grid {
+.remix-tab-panel[data-remix-panel="xiaohongshu"] .remix-grid,
+.remix-tab-panel[data-remix-panel="douyin"] .remix-grid {
   grid-template-columns: 1fr;
   gap: 16px;
 }
 
 .remix-tab-panel[data-remix-panel="jianying"] .panel,
-.remix-tab-panel[data-remix-panel="xiaohongshu"] .panel {
+.remix-tab-panel[data-remix-panel="xiaohongshu"] .panel,
+.remix-tab-panel[data-remix-panel="douyin"] .panel {
   height: auto;
   border-radius: 8px;
   box-shadow: none;

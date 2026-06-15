@@ -73,6 +73,7 @@ function renderAnalysis(data) {
   $("copyAllBtn").disabled = false;
   $("copyAllFooterBtn").disabled = false;
   $("xiaohongshuFlowBtn").disabled = false;
+  $("douyinFlowBtn").disabled = false;
   $("jianyingFlowBtn").disabled = false;
   $("jianyingBtn").disabled = false;
   $("affiliatePlanBtn").disabled = false;
@@ -331,6 +332,26 @@ async function createXiaohongshuPackageAndGo() {
   setRemixStatus("小红书图文包已按当前图片重新生成");
 }
 
+async function createDouyinPackageAndGo() {
+  const packageData = await createPackage();
+  setActiveTab("douyin");
+  const content = currentPackageContent("douyin");
+  if (!content) {
+    setRemixStatus("已生成基础素材包，请在抖音图文历史中手动生成图文包");
+    return;
+  }
+  setRemixStatus("抖音图文包生成中", "busy");
+  const data = await api("/api/remix/content/douyin-generate", {
+    method: "POST",
+    body: JSON.stringify({ id: content.id, source_package_path: packageData.package_path || "" }),
+  });
+  writeResult(data);
+  await loadPackageHistory();
+  setActiveTab("douyin");
+  selectContent(content.id);
+  setRemixStatus("抖音图文包已按当前素材生成");
+}
+
 function currentPackageContent(tab = remixState.activeTab) {
   const sourceUrl = String(remixState.analysis?.url || "").trim();
   const title = String(remixState.analysis?.copywriting?.title || "").trim();
@@ -445,6 +466,14 @@ function historyElements(tab = remixState.activeTab) {
       editor: "",
       pager: "xiaohongshuHistoryPager",
     },
+    douyin: {
+      list: "douyinHistoryList",
+      detail: "",
+      editorTitle: "",
+      saveButton: "",
+      editor: "",
+      pager: "douyinHistoryPager",
+    },
   }[tab];
   return {
     list: config.list ? $(config.list) : null,
@@ -461,6 +490,7 @@ function packageGroupsForTab(tab) {
     extract: ["remix"],
     jianying: ["remix", "jianying", "affiliate-jianying"],
     xiaohongshu: ["remix", "xiaohongshu-note"],
+    douyin: ["remix", "xiaohongshu-note", "douyin-note"],
   }[tab] || [];
 }
 
@@ -512,7 +542,7 @@ function renderPackageHistory() {
     const status = document.createElement("div");
     status.className = "package-workflow-status";
     status.appendChild(packageStatusBadge(item, tab));
-    if (tab !== "xiaohongshu") status.appendChild(packageWorkflowSteps(item));
+    if (!["xiaohongshu", "douyin"].includes(tab)) status.appendChild(packageWorkflowSteps(item));
     const source = document.createElement("div");
     source.className = "package-history-source";
     source.textContent = `链接：${item.source_url || "无来源链接"}`;
@@ -538,8 +568,8 @@ function renderPackageHistory() {
     openFolderBtn.type = "button";
     openFolderBtn.className = "text-btn";
     openFolderBtn.textContent = "查看详情";
-    openFolderBtn.addEventListener("click", () => openXiaohongshuContentFolder(item.id, openFolderBtn));
-    const baseButtons = tab === "xiaohongshu" ? [openFolderBtn] : [viewBtn, editBtn];
+    openFolderBtn.addEventListener("click", () => openPlatformContentFolder(item.id, openFolderBtn, tab));
+    const baseButtons = ["xiaohongshu", "douyin"].includes(tab) ? [openFolderBtn] : [viewBtn, editBtn];
     actions.append(...baseButtons, ...tabActionButtons, deleteBtn);
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
@@ -555,7 +585,7 @@ function renderPackageHistory() {
 }
 
 function historyPageSize(tab) {
-  return tab === "xiaohongshu" ? 6 : Number.POSITIVE_INFINITY;
+  return ["xiaohongshu", "douyin"].includes(tab) ? 6 : Number.POSITIVE_INFINITY;
 }
 
 function historyPageItems(contents, tab) {
@@ -607,6 +637,7 @@ function emptyHistoryText(tab) {
     extract: "暂无基础素材包。请先在素材拆解 tab 生成图文/视频包。",
     jianying: "暂无可用于剪映的视频素材。请先在素材拆解 tab 生成基础素材包。",
     xiaohongshu: "暂无可用于小红书的拆解内容。请先在素材拆解 tab 生成基础素材包。",
+    douyin: "暂无可用于抖音图文的内容。请先生成小红书图文包或基础素材包。",
   }[tab] || "暂无生成内容。";
 }
 
@@ -650,6 +681,11 @@ function workflowStatusForContent(item, tab = remixState.activeTab) {
     if (groups.has("xiaohongshu-note")) return { text: "小红书图文包已生成", kind: "ready" };
     if (groups.has("remix")) return { text: "待生成图文包", kind: "pending" };
   }
+  if (tab === "douyin") {
+    if (groups.has("douyin-note")) return { text: "抖音图文包已生成", kind: "ready" };
+    if (groups.has("xiaohongshu-note")) return { text: "可同步为抖音图文", kind: "pending" };
+    if (groups.has("remix")) return { text: "待生成抖音图文包", kind: "pending" };
+  }
   if (groups.has("remix")) return { text: "已拆解", kind: "ready" };
   return { text: "缺少基础素材包", kind: "blocked" };
 }
@@ -682,6 +718,15 @@ function packageActionButtons(item) {
     publishBtn.textContent = "一键发布到小红书";
     publishBtn.addEventListener("click", () => startXiaohongshuPublish(item.id, publishBtn));
     return [generateBtn, publishBtn];
+  }
+  if (remixState.activeTab === "douyin") {
+    const groups = packageGroupSet(item);
+    const generateBtn = document.createElement("button");
+    generateBtn.type = "button";
+    generateBtn.className = "text-btn";
+    generateBtn.textContent = groups.has("douyin-note") ? "重新生成图文包" : "生成图文包";
+    generateBtn.addEventListener("click", () => startDouyinGeneration(item.id, generateBtn));
+    return [generateBtn];
   }
   return [];
 }
@@ -756,6 +801,7 @@ function packageGroupLabel(group) {
     jianying: "剪映包",
     "affiliate-jianying": "带货剪映包",
     "xiaohongshu-note": "小红书图文包",
+    "douyin-note": "抖音图文包",
   }[group] || group;
 }
 
@@ -829,6 +875,52 @@ async function openXiaohongshuContentFolder(contentId, button) {
     writeResult({ ok: false, error: error.message });
   } finally {
     button.disabled = false;
+  }
+}
+
+async function openPlatformContentFolder(contentId, button, tab) {
+  if (tab === "xiaohongshu") {
+    await openXiaohongshuContentFolder(contentId, button);
+    return;
+  }
+  button.disabled = true;
+  try {
+    selectContent(contentId);
+    setRemixStatus("正在打开抖音图文素材文件夹", "busy");
+    const data = await api("/api/remix/content/douyin-open-folder", {
+      method: "POST",
+      body: JSON.stringify({ id: contentId }),
+    });
+    writeResult(data);
+    setRemixStatus("已打开抖音图文素材文件夹");
+  } catch (error) {
+    setRemixStatus("打开素材文件夹失败", "error");
+    writeResult({ ok: false, error: error.message });
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function startDouyinGeneration(contentId, button) {
+  const progress = startManualButtonProgress(button);
+  try {
+    selectContent(contentId);
+    setRemixStatus("抖音图文包生成中", "busy");
+    progress.update(35);
+    const data = await api("/api/remix/content/douyin-generate", {
+      method: "POST",
+      body: JSON.stringify({ id: contentId }),
+    });
+    progress.update(100);
+    progress.stop(true);
+    writeResult(data);
+    await loadPackageHistory();
+    selectContent(contentId);
+    setRemixStatus("抖音图文包已生成");
+  } catch (error) {
+    progress.stop(false);
+    setRemixStatus("抖音图文生成失败", "error");
+    writeResult({ ok: false, error: error.message });
   }
 }
 
@@ -1440,6 +1532,7 @@ function bind(id, fn) {
 
 bind("analyzeBtn", analyzeLink);
 bind("xiaohongshuFlowBtn", createXiaohongshuPackageAndGo);
+bind("douyinFlowBtn", createDouyinPackageAndGo);
 bind("jianyingFlowBtn", () => createPackageAndGo("jianying"));
 bind("jianyingBtn", createJianyingPackage);
 bind("copyAllBtn", copyAll);

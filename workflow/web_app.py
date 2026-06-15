@@ -453,7 +453,7 @@ def list_remix_packages(root: Path) -> Dict[str, Any]:
 def prune_stale_remix_history_packages(root: Path) -> None:
     packages_root = root / "remix_packages"
     candidates: Dict[tuple[str, str], List[Path]] = {}
-    for group in ("remix", "xiaohongshu-note"):
+    for group in ("remix", "xiaohongshu-note", "douyin-note"):
         group_dir = packages_root / group
         if not group_dir.exists():
             continue
@@ -1688,6 +1688,7 @@ def packageGroupName(group: str) -> str:
         "jianying": "剪映包",
         "affiliate-jianying": "带货剪映包",
         "xiaohongshu-note": "小红书图文包",
+        "douyin-note": "抖音图文包",
     }.get(group, group or "未知")
 
 

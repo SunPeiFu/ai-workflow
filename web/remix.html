@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>链接素材拆解</title>
-    <link rel="stylesheet" href="/app.css?v=20260615-focus-studio" />
+    <link rel="stylesheet" href="/app.css?v=20260615-douyin-image" />
   </head>
   <body class="remix-body">
     <main class="app-shell">
@@ -18,6 +18,7 @@
             <button class="remix-tab-btn is-active" type="button" data-remix-tab="extract" role="tab" aria-selected="true">素材拆解</button>
             <button class="remix-tab-btn" type="button" data-remix-tab="jianying" role="tab" aria-selected="false">剪映视频</button>
             <button class="remix-tab-btn" type="button" data-remix-tab="xiaohongshu" role="tab" aria-selected="false">小红书图文</button>
+            <button class="remix-tab-btn" type="button" data-remix-tab="douyin" role="tab" aria-selected="false">抖音图文</button>
           </nav>
           <div class="remix-appbar-actions">
             <span class="autosave-state">本地工作流</span>
@@ -165,6 +166,7 @@
             </div>
             <div class="actionbar-primary">
               <button id="xiaohongshuFlowBtn" class="secondary" type="button" disabled>生成小红书图文</button>
+              <button id="douyinFlowBtn" class="secondary" type="button" disabled>生成抖音图文</button>
               <button id="jianyingFlowBtn" type="button" disabled>生成剪映视频</button>
             </div>
           </footer>
@@ -235,6 +237,27 @@
         </div>
         </div>
 
+        <div class="remix-tab-panel" data-remix-panel="douyin" role="tabpanel" hidden>
+        <div class="remix-grid">
+          <section class="panel xiaohongshu-panel">
+            <div class="panel-head">
+              <h2>抖音图文生成</h2>
+            </div>
+            <p class="tab-helper">优先复用已生成的小红书图片素材，自动转换为抖音标题、短正文、标签、图片顺序和发布检查清单。</p>
+          </section>
+
+          <section class="panel package-history-panel" data-history-scope="douyin">
+            <div class="panel-head">
+              <h2>抖音图文历史</h2>
+            </div>
+            <div class="package-history-layout xiaohongshu-history-layout">
+              <div id="douyinHistoryList" class="package-history-list xiaohongshu-history-list">正在加载历史内容...</div>
+              <div id="douyinHistoryPager" class="package-pagination"></div>
+            </div>
+          </section>
+        </div>
+        </div>
+
         <div class="remix-tab-panel" data-remix-panel="xiaohongshu" role="tabpanel" hidden>
         <div class="remix-grid">
           <section class="panel xiaohongshu-panel">
@@ -264,6 +287,6 @@
       <button id="imageLightboxNext" class="image-lightbox-nav image-lightbox-next" type="button" title="下一张">›</button>
       <div id="imageLightboxCounter" class="image-lightbox-counter">0 / 0</div>
     </div>
-    <script src="/remix.js?v=20260615-focus-studio"></script>
+    <script src="/remix.js?v=20260615-douyin-image"></script>
   </body>
 </html>

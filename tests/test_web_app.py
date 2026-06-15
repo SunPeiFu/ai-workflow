@@ -20,6 +20,7 @@ from workflow.web_app import (
     list_voices,
     list_projects,
     list_remix_packages,
+    open_xiaohongshu_content_folder,
     package_platform_publish,
     performance_insights,
     performance_summary,
@@ -52,6 +53,53 @@ from workflow.web_app import (
 
 
 class WebAppTest(unittest.TestCase):
+    def test_open_xiaohongshu_content_folder_prefers_generated_note_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_url = "https://www.xiaohongshu.com/explore/open-folder"
+            remix_dir = root / "remix_packages" / "remix" / "source"
+            note_dir = root / "remix_packages" / "xiaohongshu-note" / "note"
+            remix_dir.mkdir(parents=True)
+            note_dir.mkdir(parents=True)
+            analysis = {
+                "url": source_url,
+                "platform": "xiaohongshu",
+                "copywriting": {"title": "打开当前素材文件夹"},
+            }
+            for package_dir in (remix_dir, note_dir):
+                (package_dir / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            content_id = list_remix_packages(root)["contents"][0]["id"]
+            with patch("workflow.web_app.subprocess.run") as run:
+                run.return_value.returncode = 0
+                result = open_xiaohongshu_content_folder(root, content_id)
+
+            self.assertTrue(result["opened_folder"])
+            self.assertEqual(result["package_group"], "xiaohongshu-note")
+            self.assertEqual(Path(result["folder"]), note_dir.resolve())
+            run.assert_called_once_with(["open", str(note_dir.resolve())], text=True, capture_output=True, check=False)
+
+    def test_open_xiaohongshu_content_folder_falls_back_to_source_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remix_dir = root / "remix_packages" / "remix" / "source"
+            remix_dir.mkdir(parents=True)
+            analysis = {
+                "url": "https://www.xiaohongshu.com/explore/source-folder",
+                "platform": "xiaohongshu",
+                "copywriting": {"title": "尚未生成图文包"},
+            }
+            (remix_dir / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            content_id = list_remix_packages(root)["contents"][0]["id"]
+            with patch("workflow.web_app.subprocess.run") as run:
+                run.return_value.returncode = 0
+                result = open_xiaohongshu_content_folder(root, content_id)
+
+            self.assertTrue(result["opened_folder"])
+            self.assertEqual(result["package_group"], "remix")
+            self.assertEqual(Path(result["folder"]), remix_dir.resolve())
+
     def test_list_read_and_save_remix_package_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

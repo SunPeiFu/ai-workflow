@@ -534,7 +534,12 @@ function renderPackageHistory() {
     deleteBtn.className = "text-btn danger-text-btn";
     deleteBtn.textContent = "删除";
     deleteBtn.addEventListener("click", () => deleteContent(item.id, item.title || item.source_url));
-    const baseButtons = tab === "xiaohongshu" ? [] : [viewBtn, editBtn];
+    const openFolderBtn = document.createElement("button");
+    openFolderBtn.type = "button";
+    openFolderBtn.className = "text-btn";
+    openFolderBtn.textContent = "查看详情";
+    openFolderBtn.addEventListener("click", () => openXiaohongshuContentFolder(item.id, openFolderBtn));
+    const baseButtons = tab === "xiaohongshu" ? [openFolderBtn] : [viewBtn, editBtn];
     actions.append(...baseButtons, ...tabActionButtons, deleteBtn);
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
@@ -806,6 +811,25 @@ async function deleteContent(contentId, title) {
   writeResult(data);
   await loadPackageHistory();
   setRemixStatus("已删除内容");
+}
+
+async function openXiaohongshuContentFolder(contentId, button) {
+  button.disabled = true;
+  try {
+    selectContent(contentId);
+    setRemixStatus("正在打开素材文件夹", "busy");
+    const data = await api("/api/remix/content/open-folder", {
+      method: "POST",
+      body: JSON.stringify({ id: contentId }),
+    });
+    writeResult(data);
+    setRemixStatus("已打开当前素材文件夹");
+  } catch (error) {
+    setRemixStatus("打开素材文件夹失败", "error");
+    writeResult({ ok: false, error: error.message });
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function startJianyingGeneration(contentId, button) {

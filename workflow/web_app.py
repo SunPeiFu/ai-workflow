@@ -531,6 +531,43 @@ def delete_remix_content(root: Path, content_id: str) -> Dict[str, Any]:
     return {"ok": True, "id": content_id, "deleted": deleted}
 
 
+def open_xiaohongshu_content_folder(root: Path, content_id: str) -> Dict[str, Any]:
+    listing = list_remix_packages(root)
+    content = next((item for item in listing.get("contents", []) if item.get("id") == str(content_id or "")), None)
+    if not content:
+        raise ValueError("内容不存在")
+
+    packages = content.get("packages") or []
+    package = next((item for item in packages if item.get("group") == "xiaohongshu-note"), None)
+    if not package:
+        package = preferred_xiaohongshu_source_package(packages)
+    if not package:
+        raise ValueError("当前项目没有可打开的小红书素材目录")
+
+    packages_root = (root / "remix_packages").resolve()
+    folder = (packages_root / str(package.get("path") or "")).resolve()
+    if not str(folder).startswith(str(packages_root)) or folder == packages_root or not folder.is_dir():
+        raise ValueError("小红书素材目录无效")
+
+    opened_folder = subprocess.run(
+        ["open", str(folder)],
+        text=True,
+        capture_output=True,
+        check=False,
+    ).returncode == 0
+    if not opened_folder:
+        raise RuntimeError("无法打开素材文件夹，请检查 Finder 是否可用")
+    return {
+        "ok": True,
+        "content_id": content_id,
+        "title": content.get("title") or "未命名内容",
+        "package_group": package.get("group") or "",
+        "folder": str(folder),
+        "opened_folder": True,
+        "message": "已在 Finder 中打开当前素材文件夹",
+    }
+
+
 def start_jianying_content_generation(root: Path, content_id: str, launch: bool = True) -> Dict[str, Any]:
     content, package, package_dir = resolve_jianying_content_package(root, content_id)
 
@@ -2810,6 +2847,9 @@ def _make_handler(root: Path):
                     return
                 if path == "/api/remix/content/delete":
                     self._json(delete_remix_content(root, str(payload.get("id") or "")))
+                    return
+                if path == "/api/remix/content/open-folder":
+                    self._json(open_xiaohongshu_content_folder(root, str(payload.get("id") or "")))
                     return
                 if path == "/api/remix/content/jianying-generate":
                     if payload.get("automation"):

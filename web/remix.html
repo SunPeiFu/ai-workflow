@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>链接素材拆解</title>
-    <link rel="stylesheet" href="/app.css?v=20260615-douyin-image" />
+    <link rel="stylesheet" href="/app.css?v=20260615-p0-pipeline" />
   </head>
   <body class="remix-body">
     <main class="app-shell">
@@ -15,6 +15,7 @@
             <span>AI 内容工作室</span>
           </a>
           <nav class="remix-tabs" aria-label="素材工作流" role="tablist">
+            <button class="remix-tab-btn" type="button" data-remix-tab="pipeline" role="tab" aria-selected="false">图文生产线</button>
             <button class="remix-tab-btn is-active" type="button" data-remix-tab="extract" role="tab" aria-selected="true">素材拆解</button>
             <button class="remix-tab-btn" type="button" data-remix-tab="jianying" role="tab" aria-selected="false">剪映视频</button>
             <button class="remix-tab-btn" type="button" data-remix-tab="xiaohongshu" role="tab" aria-selected="false">小红书图文</button>
@@ -25,6 +26,121 @@
             <a class="nav-link" href="/">工作台</a>
           </div>
         </header>
+
+        <div class="remix-tab-panel" data-remix-panel="pipeline" role="tabpanel" hidden>
+          <section class="pipeline-shell">
+            <header class="pipeline-header">
+              <div>
+                <span class="section-kicker">P0 变现工作流</span>
+                <h1>图文生产线</h1>
+                <p>从待加工链接到发布质检，在一个项目状态里连续完成。</p>
+              </div>
+              <div class="pipeline-summary">
+                <strong id="pipelineTotal">0</strong>
+                <span>条内容</span>
+                <span id="pipelineSelectedCount">未选择</span>
+              </div>
+            </header>
+
+            <nav class="pipeline-steps" aria-label="图文生产步骤">
+              <button class="is-active" type="button" data-pipeline-step="pool"><span>1</span>待加工素材池</button>
+              <button type="button" data-pipeline-step="score"><span>2</span>商品选品评分</button>
+              <button type="button" data-pipeline-step="rewrite"><span>3</span>批量平台改写</button>
+              <button type="button" data-pipeline-step="images"><span>4</span>图片编排工作台</button>
+              <button type="button" data-pipeline-step="audit"><span>5</span>发布前质检</button>
+            </nav>
+
+            <div class="pipeline-layout">
+              <aside class="pipeline-queue">
+                <div class="pipeline-queue-head">
+                  <div>
+                    <strong>内容队列</strong>
+                    <span id="pipelineQueueMeta">等待加载</span>
+                  </div>
+                  <button id="pipelineRefreshBtn" class="icon-action" type="button" title="刷新">↻</button>
+                </div>
+                <div class="pipeline-filters">
+                  <input id="pipelineSearch" type="search" placeholder="搜索标题或链接" />
+                  <select id="pipelineStatusFilter" aria-label="状态筛选">
+                    <option value="">全部状态</option>
+                    <option value="pending">待拆解</option>
+                    <option value="analyzed">已拆解</option>
+                    <option value="scored">已评分</option>
+                    <option value="rewritten">已改写</option>
+                    <option value="arranged">已编排</option>
+                    <option value="ready">可发布</option>
+                    <option value="blocked">待修正</option>
+                  </select>
+                </div>
+                <div id="pipelineList" class="pipeline-list">正在加载素材池...</div>
+              </aside>
+
+              <main class="pipeline-workspace">
+                <section class="pipeline-step-panel is-active" data-pipeline-step-panel="pool">
+                  <div class="pipeline-panel-head">
+                    <div><span class="section-kicker">Step 01</span><h2>批量收集待加工素材</h2></div>
+                    <button id="pipelineAddBtn" type="button">加入素材池</button>
+                  </div>
+                  <textarea id="pipelineLinks" rows="7" placeholder="粘贴抖音 / 小红书 / 快手分享文字，可一次粘贴多条。系统自动提取链接并去重。"></textarea>
+                  <div class="pipeline-note">已有拆解素材包会自动合并到队列，不重复创建。</div>
+                  <div id="pipelinePoolDetail" class="pipeline-detail-empty">从左侧选择一条内容，可编辑标题、正文和标签。</div>
+                </section>
+
+                <section class="pipeline-step-panel" data-pipeline-step-panel="score" hidden>
+                  <div class="pipeline-panel-head">
+                    <div><span class="section-kicker">Step 02</span><h2>商品选品评分</h2></div>
+                    <button id="pipelineScoreBtn" type="button">计算评分</button>
+                  </div>
+                  <div id="pipelineScoreEmpty" class="pipeline-detail-empty">选择一条内容后填写商品数据。</div>
+                  <div id="pipelineProductForm" class="pipeline-product-grid" hidden>
+                    <label>商品名称<input id="pipelineProductName" /></label>
+                    <label>价格（元）<input id="pipelinePrice" type="number" min="0" step="0.01" /></label>
+                    <label>佣金率（%）<input id="pipelineCommission" type="number" min="0" max="100" /></label>
+                    <label>月销量<input id="pipelineSales" type="number" min="0" /></label>
+                    <label>商品评分<input id="pipelineRating" type="number" min="0" max="5" step="0.1" /></label>
+                    <label>店铺评分<input id="pipelineStoreScore" type="number" min="0" max="5" step="0.1" /></label>
+                    <label>退款率（%）<input id="pipelineRefundRate" type="number" min="0" max="100" /></label>
+                    <label>素材完整度（%）<input id="pipelineAssetCompleteness" type="number" min="0" max="100" /></label>
+                    <label class="pipeline-checkbox-field"><input id="pipelineCoupon" type="checkbox" /> 有可用优惠券</label>
+                  </div>
+                  <div id="pipelineScoreResult" class="pipeline-score-result"></div>
+                </section>
+
+                <section class="pipeline-step-panel" data-pipeline-step-panel="rewrite" hidden>
+                  <div class="pipeline-panel-head">
+                    <div><span class="section-kicker">Step 03</span><h2>批量平台改写</h2></div>
+                    <div class="pipeline-inline-actions">
+                      <select id="pipelineRewriteLevel">
+                        <option value="standard">标准改写</option>
+                        <option value="deep">深度改写</option>
+                      </select>
+                      <button id="pipelineRewriteBtn" type="button">改写选中内容</button>
+                    </div>
+                  </div>
+                  <p class="pipeline-note">按左侧勾选项批量生成小红书与抖音草稿；未勾选时处理当前内容。</p>
+                  <div id="pipelineDrafts" class="pipeline-drafts pipeline-detail-empty">选择内容后查看双平台草稿。</div>
+                </section>
+
+                <section class="pipeline-step-panel" data-pipeline-step-panel="images" hidden>
+                  <div class="pipeline-panel-head">
+                    <div><span class="section-kicker">Step 04</span><h2>图片编排工作台</h2></div>
+                    <button id="pipelineSaveImagesBtn" type="button">保存顺序与封面</button>
+                  </div>
+                  <p class="pipeline-note">拖动图片调整顺序，点击“设为封面”，移除只影响当前发布项目。</p>
+                  <div id="pipelineImageBoard" class="pipeline-image-board pipeline-detail-empty">选择包含图片的内容开始编排。</div>
+                </section>
+
+                <section class="pipeline-step-panel" data-pipeline-step-panel="audit" hidden>
+                  <div class="pipeline-panel-head">
+                    <div><span class="section-kicker">Step 05</span><h2>发布前质检</h2></div>
+                    <button id="pipelineAuditBtn" type="button">运行质检</button>
+                  </div>
+                  <div id="pipelineAuditResult" class="pipeline-audit-result pipeline-detail-empty">选择内容后检查文案风险、图片、封面和商品信息。</div>
+                </section>
+              </main>
+            </div>
+          </section>
+        </div>
 
         <div class="remix-tab-panel is-active" data-remix-panel="extract" role="tabpanel">
           <section class="remix-commandbar" id="remixInputSection">
@@ -287,6 +403,6 @@
       <button id="imageLightboxNext" class="image-lightbox-nav image-lightbox-next" type="button" title="下一张">›</button>
       <div id="imageLightboxCounter" class="image-lightbox-counter">0 / 0</div>
     </div>
-    <script src="/remix.js?v=20260615-douyin-image"></script>
+    <script src="/remix.js?v=20260615-p0-pipeline"></script>
   </body>
 </html>

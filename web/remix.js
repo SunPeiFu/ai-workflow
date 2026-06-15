@@ -17,6 +17,12 @@ const remixState = {
   selectedContentByTab: {},
   packagePageByTab: {},
   uploadPreviewUrls: {},
+  pipelineItems: [],
+  pipelineCurrentId: "",
+  pipelineSelectedIds: new Set(),
+  pipelineStep: "pool",
+  pipelineImageOrder: [],
+  pipelineCoverImage: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -517,7 +523,7 @@ function filterContentsForTab(contents, tab = remixState.activeTab) {
 
 function renderPackageHistory() {
   const tab = remixState.activeTab;
-  if (tab === "extract") return;
+  if (tab === "extract" || tab === "pipeline") return;
   const contents = filterContentsForTab(remixState.packageContents, tab);
   const { list, pager } = historyElements(tab);
   if (!list) return;
@@ -1515,6 +1521,334 @@ function toggleEmoji(field, button) {
   button.textContent = enabled ? "已加入 emoji" : "加入 emoji";
 }
 
+function pipelineCurrentItem() {
+  return remixState.pipelineItems.find((item) => item.id === remixState.pipelineCurrentId) || null;
+}
+
+function pipelineStatusLabel(status) {
+  return {
+    pending: "待拆解",
+    analyzed: "已拆解",
+    scored: "已评分",
+    rewritten: "已改写",
+    arranged: "已编排",
+    ready: "可发布",
+    blocked: "待修正",
+  }[status] || status || "待处理";
+}
+
+async function loadPipeline() {
+  const data = await api("/api/remix/pipeline");
+  remixState.pipelineItems = data.items || [];
+  if (!pipelineCurrentItem() && remixState.pipelineItems.length) {
+    remixState.pipelineCurrentId = remixState.pipelineItems[0].id;
+  }
+  $("pipelineTotal").textContent = String(remixState.pipelineItems.length);
+  renderPipelineList();
+  renderPipelineWorkspace();
+}
+
+function filteredPipelineItems() {
+  const query = $("pipelineSearch").value.trim().toLowerCase();
+  const status = $("pipelineStatusFilter").value;
+  return remixState.pipelineItems.filter((item) => {
+    const matchesQuery = !query || `${item.title || ""} ${item.url || ""}`.toLowerCase().includes(query);
+    return matchesQuery && (!status || item.status === status);
+  });
+}
+
+function renderPipelineList() {
+  const list = $("pipelineList");
+  const items = filteredPipelineItems();
+  list.innerHTML = "";
+  $("pipelineQueueMeta").textContent = `${items.length} / ${remixState.pipelineItems.length}`;
+  $("pipelineSelectedCount").textContent = remixState.pipelineSelectedIds.size
+    ? `已勾选 ${remixState.pipelineSelectedIds.size} 条`
+    : "未勾选";
+  if (!items.length) {
+    list.textContent = "暂无符合条件的内容";
+    return;
+  }
+  for (const item of items) {
+    const card = document.createElement("article");
+    card.className = "pipeline-queue-item";
+    card.classList.toggle("is-current", item.id === remixState.pipelineCurrentId);
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = remixState.pipelineSelectedIds.has(item.id);
+    checkbox.setAttribute("aria-label", `选择${item.title || item.url}`);
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) remixState.pipelineSelectedIds.add(item.id);
+      else remixState.pipelineSelectedIds.delete(item.id);
+      renderPipelineList();
+    });
+    const content = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.title || "待补充标题";
+    const source = document.createElement("span");
+    source.textContent = `${item.platform || "unknown"} · ${item.image_count || 0} 张图`;
+    const badge = document.createElement("em");
+    badge.className = `pipeline-status status-${item.status || "pending"}`;
+    badge.textContent = pipelineStatusLabel(item.status);
+    content.append(title, source);
+    card.append(checkbox, content, badge);
+    card.addEventListener("click", () => {
+      remixState.pipelineCurrentId = item.id;
+      renderPipelineList();
+      renderPipelineWorkspace();
+    });
+    list.appendChild(card);
+  }
+}
+
+function setPipelineStep(step) {
+  remixState.pipelineStep = step;
+  document.querySelectorAll("[data-pipeline-step]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.pipelineStep === step);
+  });
+  document.querySelectorAll("[data-pipeline-step-panel]").forEach((panel) => {
+    const active = panel.dataset.pipelineStepPanel === step;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  });
+  renderPipelineWorkspace();
+}
+
+function renderPipelineWorkspace() {
+  const item = pipelineCurrentItem();
+  renderPipelinePoolDetail(item);
+  renderPipelineProduct(item);
+  renderPipelineDrafts(item);
+  renderPipelineImages(item);
+  renderPipelineAudit(item);
+}
+
+function renderPipelinePoolDetail(item) {
+  const box = $("pipelinePoolDetail");
+  if (!item) {
+    box.className = "pipeline-detail-empty";
+    box.textContent = "从左侧选择一条内容，可编辑标题、正文和标签。";
+    return;
+  }
+  box.className = "pipeline-edit-form";
+  box.innerHTML = `
+    <label>标题<input id="pipelineEditTitle" value="${escapeHtmlAttribute(item.title || "")}" /></label>
+    <label>正文<textarea id="pipelineEditBody" rows="5">${escapeHtml(item.body || "")}</textarea></label>
+    <label>标签<input id="pipelineEditTags" value="${escapeHtmlAttribute((item.tags || []).map((tag) => `#${tag}`).join(" "))}" /></label>
+    <div class="pipeline-form-actions"><span>${escapeHtml(item.url || "")}</span><button id="pipelineSaveCopyBtn" class="secondary" type="button">保存文案</button></div>
+  `;
+  $("pipelineSaveCopyBtn").addEventListener("click", savePipelineCopy);
+}
+
+function renderPipelineProduct(item) {
+  $("pipelineScoreEmpty").hidden = Boolean(item);
+  $("pipelineProductForm").hidden = !item;
+  $("pipelineScoreBtn").disabled = !item;
+  const result = $("pipelineScoreResult");
+  if (!item) {
+    result.innerHTML = "";
+    return;
+  }
+  const product = item.product || {};
+  const fields = {
+    pipelineProductName: product.name,
+    pipelinePrice: product.price,
+    pipelineCommission: product.commission_rate,
+    pipelineSales: product.monthly_sales,
+    pipelineRating: product.rating,
+    pipelineStoreScore: product.store_score,
+    pipelineRefundRate: product.refund_rate,
+    pipelineAssetCompleteness: product.asset_completeness,
+  };
+  for (const [id, value] of Object.entries(fields)) $(id).value = value ?? "";
+  $("pipelineCoupon").checked = Boolean(product.has_coupon);
+  const score = item.product_score;
+  result.innerHTML = score
+    ? `<div class="pipeline-score-card"><strong>${score.score}</strong><span>${escapeHtml(score.grade)}</span><small>佣金 ${score.breakdown.commission} · 需求 ${score.breakdown.demand} · 口碑 ${score.breakdown.rating}</small></div>`
+    : "";
+}
+
+function renderPipelineDrafts(item) {
+  const box = $("pipelineDrafts");
+  if (!item || !Object.keys(item.drafts || {}).length) {
+    box.className = "pipeline-drafts pipeline-detail-empty";
+    box.textContent = "选择内容并执行改写后，在这里对比双平台草稿。";
+    return;
+  }
+  box.className = "pipeline-drafts";
+  box.innerHTML = ["xiaohongshu", "douyin"].map((platform) => {
+    const draft = item.drafts[platform] || {};
+    const name = platform === "xiaohongshu" ? "小红书" : "抖音";
+    return `<article><span>${name}</span><h3>${escapeHtml(draft.title || "")}</h3><p>${escapeHtml(draft.body || "")}</p><strong>${escapeHtml(draft.tags || "")}</strong></article>`;
+  }).join("");
+}
+
+function renderPipelineImages(item) {
+  const board = $("pipelineImageBoard");
+  $("pipelineSaveImagesBtn").disabled = !item;
+  if (!item || !(item.images || []).length) {
+    remixState.pipelineImageOrder = [];
+    remixState.pipelineCoverImage = "";
+    board.className = "pipeline-image-board pipeline-detail-empty";
+    board.textContent = "当前内容没有图片，请先在素材拆解中上传或保留图片。";
+    return;
+  }
+  remixState.pipelineImageOrder = [...item.images];
+  remixState.pipelineCoverImage = imageValue(item.cover_image) || imageValue(item.images[0]);
+  board.className = "pipeline-image-board";
+  drawPipelineImageBoard();
+}
+
+function drawPipelineImageBoard() {
+  const board = $("pipelineImageBoard");
+  board.innerHTML = "";
+  remixState.pipelineImageOrder.forEach((image, index) => {
+    const value = imageValue(image);
+    const card = document.createElement("article");
+    card.className = "pipeline-image-item";
+    card.draggable = true;
+    card.dataset.index = String(index);
+    card.innerHTML = `
+      <img src="${escapeHtmlAttribute(imagePreviewUrl(image))}" alt="第 ${index + 1} 张图片" />
+      <div><strong>${index + 1}</strong><button type="button" data-cover="${escapeHtmlAttribute(value)}">${value === remixState.pipelineCoverImage ? "当前封面" : "设为封面"}</button><button type="button" data-remove="${index}">移除</button></div>
+    `;
+    card.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", String(index)));
+    card.addEventListener("dragover", (event) => event.preventDefault());
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const from = Number(event.dataTransfer.getData("text/plain"));
+      const to = index;
+      const [moved] = remixState.pipelineImageOrder.splice(from, 1);
+      remixState.pipelineImageOrder.splice(to, 0, moved);
+      drawPipelineImageBoard();
+    });
+    card.querySelector("[data-cover]").addEventListener("click", () => {
+      remixState.pipelineCoverImage = value;
+      drawPipelineImageBoard();
+    });
+    card.querySelector("[data-remove]").addEventListener("click", () => {
+      remixState.pipelineImageOrder.splice(index, 1);
+      if (!remixState.pipelineImageOrder.some((candidate) => imageValue(candidate) === remixState.pipelineCoverImage)) {
+        remixState.pipelineCoverImage = imageValue(remixState.pipelineImageOrder[0]);
+      }
+      drawPipelineImageBoard();
+    });
+    board.appendChild(card);
+  });
+}
+
+function renderPipelineAudit(item) {
+  const box = $("pipelineAuditResult");
+  $("pipelineAuditBtn").disabled = !item;
+  const audit = item?.audit;
+  if (!audit) {
+    box.className = "pipeline-audit-result pipeline-detail-empty";
+    box.textContent = item ? "点击运行质检，检查发布阻断项。" : "选择内容后检查文案风险、图片、封面和商品信息。";
+    return;
+  }
+  box.className = `pipeline-audit-result ${audit.ready_to_publish ? "is-ready" : "is-blocked"}`;
+  const issues = (audit.issues || []).map((issue) => `<li class="${issue.severity}"><strong>${issue.severity === "blocker" ? "必须修正" : "建议优化"}</strong>${escapeHtml(issue.message)}</li>`).join("");
+  box.innerHTML = `<div class="pipeline-audit-score"><strong>${audit.score}</strong><span>${audit.ready_to_publish ? "可以发布" : "暂不可发布"}</span></div><ul>${issues || "<li class='pass'>关键检查项均已通过</li>"}</ul>`;
+}
+
+async function addPipelineLinks() {
+  const text = $("pipelineLinks").value.trim();
+  if (!text) throw new Error("请先粘贴分享链接或分享文字");
+  const data = await api("/api/remix/pipeline/add", { method: "POST", body: JSON.stringify({ text }) });
+  $("pipelineLinks").value = "";
+  await loadPipeline();
+  setRemixStatus(`已加入 ${data.added} 条素材`);
+}
+
+async function savePipelineCopy() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  await api("/api/remix/pipeline/update", {
+    method: "POST",
+    body: JSON.stringify({
+      id: item.id,
+      changes: {
+        title: $("pipelineEditTitle").value.trim(),
+        body: $("pipelineEditBody").value.trim(),
+        tags: tagsFromText($("pipelineEditTags").value),
+        status: item.status === "pending" ? "analyzed" : item.status,
+      },
+    }),
+  });
+  await loadPipeline();
+  setRemixStatus("素材文案已保存");
+}
+
+async function scorePipelineProduct() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  const product = {
+    name: $("pipelineProductName").value.trim(),
+    price: Number($("pipelinePrice").value || 0),
+    commission_rate: Number($("pipelineCommission").value || 0),
+    monthly_sales: Number($("pipelineSales").value || 0),
+    rating: Number($("pipelineRating").value || 0),
+    store_score: Number($("pipelineStoreScore").value || 0),
+    refund_rate: Number($("pipelineRefundRate").value || 0),
+    asset_completeness: Number($("pipelineAssetCompleteness").value || 0),
+    has_coupon: $("pipelineCoupon").checked,
+  };
+  await api("/api/remix/pipeline/product", { method: "POST", body: JSON.stringify({ id: item.id, product }) });
+  await loadPipeline();
+  setRemixStatus("选品评分已更新");
+}
+
+async function rewritePipelineItems() {
+  const ids = remixState.pipelineSelectedIds.size
+    ? [...remixState.pipelineSelectedIds]
+    : [remixState.pipelineCurrentId].filter(Boolean);
+  if (!ids.length) throw new Error("请先选择需要改写的内容");
+  await api("/api/remix/pipeline/rewrite", {
+    method: "POST",
+    body: JSON.stringify({ ids, level: $("pipelineRewriteLevel").value }),
+  });
+  await loadPipeline();
+  setRemixStatus(`已生成 ${ids.length} 条双平台草稿`);
+}
+
+async function savePipelineImages() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  await api("/api/remix/pipeline/images", {
+    method: "POST",
+    body: JSON.stringify({
+      id: item.id,
+      images: remixState.pipelineImageOrder,
+      cover_image: remixState.pipelineCoverImage,
+    }),
+  });
+  await loadPipeline();
+  setRemixStatus("图片顺序与封面已保存");
+}
+
+async function auditPipelineItem() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  await api("/api/remix/pipeline/audit", { method: "POST", body: JSON.stringify({ id: item.id }) });
+  await loadPipeline();
+  setRemixStatus("发布质检已完成");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character]);
+}
+
+function escapeHtmlAttribute(value) {
+  return escapeHtml(value);
+}
+
 function writeResult(data) {
   console.debug("remix result", data);
 }
@@ -1548,6 +1882,17 @@ bind("aiPolishImagesBtn", async () => {
 });
 bind("affiliatePlanBtn", createAffiliatePlan);
 bind("affiliateJianyingBtn", createAffiliateJianyingPackage);
+bind("pipelineAddBtn", addPipelineLinks);
+bind("pipelineRefreshBtn", loadPipeline);
+bind("pipelineScoreBtn", scorePipelineProduct);
+bind("pipelineRewriteBtn", rewritePipelineItems);
+bind("pipelineSaveImagesBtn", savePipelineImages);
+bind("pipelineAuditBtn", auditPipelineItem);
+$("pipelineSearch").addEventListener("input", renderPipelineList);
+$("pipelineStatusFilter").addEventListener("change", renderPipelineList);
+document.querySelectorAll("[data-pipeline-step]").forEach((button) => {
+  button.addEventListener("click", () => setPipelineStep(button.dataset.pipelineStep));
+});
 $("imagePolishPrompt").addEventListener("input", updateImageActionState);
 $("imagePolishEngine").addEventListener("change", () => {
   const engine = $("imagePolishEngine").value;
@@ -1684,4 +2029,8 @@ loadPackageHistory().catch((error) => {
   const { list } = historyElements();
   if (list) list.textContent = `历史内容加载失败：${error.message}`;
   setRemixStatus("历史内容加载失败", "error");
+});
+
+loadPipeline().catch((error) => {
+  $("pipelineList").textContent = `素材池加载失败：${error.message}`;
 });

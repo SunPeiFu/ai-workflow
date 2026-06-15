@@ -71,6 +71,7 @@ function renderAnalysis(data) {
   $("bodyText").textContent = copywriting.body || "未读取到正文，可在左侧手动补充后重新拆解。";
   $("tagsText").textContent = (copywriting.tags || []).map((tag) => `#${tag}`).join(" ") || "未读取到标签。";
   $("copyAllBtn").disabled = false;
+  $("copyAllFooterBtn").disabled = false;
   $("xiaohongshuFlowBtn").disabled = false;
   $("jianyingFlowBtn").disabled = false;
   $("jianyingBtn").disabled = false;
@@ -1418,6 +1419,7 @@ bind("xiaohongshuFlowBtn", createXiaohongshuPackageAndGo);
 bind("jianyingFlowBtn", () => createPackageAndGo("jianying"));
 bind("jianyingBtn", createJianyingPackage);
 bind("copyAllBtn", copyAll);
+bind("copyAllFooterBtn", copyAll);
 bind("uploadImagesBtn", uploadImages);
 bind("deleteImagesBtn", deleteSelectedImages);
 bind("aiPolishImagesBtn", async () => {
@@ -1448,6 +1450,19 @@ $("rewriteModelSelect").addEventListener("change", (event) => {
 
 document.querySelectorAll("[data-remix-tab]").forEach((button) => {
   button.addEventListener("click", () => setActiveTab(button.dataset.remixTab));
+});
+
+document.querySelectorAll("[data-inspector-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-inspector-target]").forEach((item) => item.classList.toggle("is-active", item === button));
+    const target = document.getElementById(button.dataset.inspectorTarget);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (target?.matches("textarea, input, select")) target.focus({ preventScroll: true });
+  });
+});
+
+document.querySelectorAll("[data-remix-tab-target]").forEach((button) => {
+  button.addEventListener("click", () => setActiveTab(button.dataset.remixTabTarget));
 });
 
 document.querySelectorAll(".refresh-packages-btn").forEach((button) => {

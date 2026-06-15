@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>链接素材拆解</title>
-    <link rel="stylesheet" href="/app.css?v=20260615-p0-pipeline" />
+    <link rel="stylesheet" href="/app.css?v=20260615-ai-copy" />
   </head>
   <body class="remix-body">
     <main class="app-shell">
@@ -15,6 +15,7 @@
             <span>AI 内容工作室</span>
           </a>
           <nav class="remix-tabs" aria-label="素材工作流" role="tablist">
+            <button class="remix-tab-btn" type="button" data-remix-tab="ai-copy" role="tab" aria-selected="false">AI 文案</button>
             <button class="remix-tab-btn" type="button" data-remix-tab="pipeline" role="tab" aria-selected="false">图文生产线</button>
             <button class="remix-tab-btn is-active" type="button" data-remix-tab="extract" role="tab" aria-selected="true">素材拆解</button>
             <button class="remix-tab-btn" type="button" data-remix-tab="jianying" role="tab" aria-selected="false">剪映视频</button>
@@ -26,6 +27,130 @@
             <a class="nav-link" href="/">工作台</a>
           </div>
         </header>
+
+        <div class="remix-tab-panel" data-remix-panel="ai-copy" role="tabpanel" hidden>
+          <section class="ai-copy-shell">
+            <header class="ai-copy-header">
+              <div>
+                <span class="section-kicker">多模型文案工作台</span>
+                <h1>AI 文案</h1>
+                <p>同一份原文可调用本地模型，也可带着完整提示词进入 Gemini 或 ChatGPT 网页版。</p>
+              </div>
+              <span id="aiCopyStatus" class="ai-copy-status">等待输入</span>
+            </header>
+
+            <div class="ai-copy-layout">
+              <section class="ai-copy-editor">
+                <div class="ai-copy-section-head">
+                  <div><span>01</span><h2>输入与任务</h2></div>
+                  <button id="aiCopyLoadProjectBtn" class="text-btn" type="button">载入项目文案</button>
+                </div>
+                <label class="ai-copy-source-field">
+                  原始文案
+                  <textarea id="aiCopySource" rows="12" placeholder="输入需要优化的标题、正文、标签或完整平台文案"></textarea>
+                </label>
+
+                <div class="ai-copy-controls">
+                  <label>
+                    AI 类型
+                    <select id="aiCopyProvider">
+                      <option value="lmstudio">本地 LM Studio</option>
+                      <option value="gemini">Gemini 网页版</option>
+                      <option value="chatgpt">ChatGPT 网页版</option>
+                    </select>
+                  </label>
+                  <label>
+                    文案任务
+                    <select id="aiCopyTask">
+                      <option value="title">标题优化</option>
+                      <option value="body" selected>正文改写</option>
+                      <option value="tags">标签生成</option>
+                      <option value="xiaohongshu">小红书改写</option>
+                      <option value="douyin">抖音改写</option>
+                    </select>
+                  </label>
+                  <label>
+                    改写强度
+                    <select id="aiCopyStrength">
+                      <option value="light">轻度</option>
+                      <option value="standard" selected>标准</option>
+                      <option value="deep">深度</option>
+                    </select>
+                  </label>
+                  <label>
+                    候选数量
+                    <select id="aiCopyCandidateCount">
+                      <option value="1">1 个</option>
+                      <option value="3" selected>3 个</option>
+                      <option value="5">5 个</option>
+                    </select>
+                  </label>
+                  <label id="aiCopyModelField" class="ai-copy-model-field">
+                    本地模型
+                    <select id="aiCopyModel">
+                      <option value="">加载模型中...</option>
+                    </select>
+                  </label>
+                  <label>
+                    关联素材项目
+                    <select id="aiCopyProject">
+                      <option value="">不关联项目</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label class="ai-copy-toggle">
+                  <input id="aiCopyEmoji" type="checkbox" />
+                  <span>允许自然 emoji</span>
+                </label>
+
+                <div class="ai-copy-primary-actions">
+                  <button id="aiCopyGenerateBtn" type="button">使用 LM Studio 生成</button>
+                  <button id="aiCopyCopyPromptBtn" class="secondary" type="button" hidden>仅复制提示词</button>
+                </div>
+                <div id="aiCopyWebHint" class="ai-copy-web-hint" hidden>
+                  网页版会复制完整提示词并打开已登录页面。网页回答完成后，将结果粘贴到右侧解析。
+                </div>
+              </section>
+
+              <section class="ai-copy-results">
+                <div class="ai-copy-section-head">
+                  <div><span>02</span><h2>候选结果</h2></div>
+                  <button id="aiCopySaveHistoryBtn" class="text-btn" type="button" disabled>保存历史</button>
+                </div>
+
+                <div id="aiCopyPastePanel" class="ai-copy-paste-panel" hidden>
+                  <label>
+                    粘贴网页模型返回内容
+                    <textarea id="aiCopyPastedResult" rows="6" placeholder="从 Gemini 或 ChatGPT 复制回答并粘贴到这里"></textarea>
+                  </label>
+                  <button id="aiCopyParseBtn" class="secondary" type="button">解析候选</button>
+                </div>
+
+                <div id="aiCopyCandidates" class="ai-copy-candidates">
+                  <div class="ai-copy-empty">生成结果将在这里展示。</div>
+                </div>
+
+                <label class="ai-copy-selected-field">
+                  当前采用结果
+                  <textarea id="aiCopySelectedResult" rows="8" placeholder="选择候选后可继续人工编辑"></textarea>
+                </label>
+                <div class="ai-copy-result-actions">
+                  <button id="aiCopyCopyResultBtn" class="secondary" type="button" disabled>复制结果</button>
+                  <button id="aiCopyBackfillBtn" type="button" disabled>回填素材项目</button>
+                </div>
+              </section>
+            </div>
+
+            <section class="ai-copy-history">
+              <div class="ai-copy-section-head">
+                <div><span>03</span><h2>本地历史</h2></div>
+                <button id="aiCopyRefreshHistoryBtn" class="icon-action" type="button" title="刷新历史">↻</button>
+              </div>
+              <div id="aiCopyHistoryList" class="ai-copy-history-list">正在加载历史...</div>
+            </section>
+          </section>
+        </div>
 
         <div class="remix-tab-panel" data-remix-panel="pipeline" role="tabpanel" hidden>
           <section class="pipeline-shell">
@@ -403,6 +528,6 @@
       <button id="imageLightboxNext" class="image-lightbox-nav image-lightbox-next" type="button" title="下一张">›</button>
       <div id="imageLightboxCounter" class="image-lightbox-counter">0 / 0</div>
     </div>
-    <script src="/remix.js?v=20260615-p0-pipeline"></script>
+    <script src="/remix.js?v=20260615-ai-copy"></script>
   </body>
 </html>

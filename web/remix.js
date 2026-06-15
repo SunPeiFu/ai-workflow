@@ -23,6 +23,10 @@ const remixState = {
   pipelineStep: "pool",
   pipelineImageOrder: [],
   pipelineCoverImage: "",
+  aiCopySuggestions: [],
+  aiCopyPrompt: "",
+  aiCopyHistory: [],
+  aiCopyHistoryId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -523,7 +527,7 @@ function filterContentsForTab(contents, tab = remixState.activeTab) {
 
 function renderPackageHistory() {
   const tab = remixState.activeTab;
-  if (tab === "extract" || tab === "pipeline") return;
+  if (tab === "extract" || tab === "pipeline" || tab === "ai-copy") return;
   const contents = filterContentsForTab(remixState.packageContents, tab);
   const { list, pager } = historyElements(tab);
   if (!list) return;
@@ -1415,24 +1419,26 @@ async function loadRewriteModels() {
 }
 
 function renderRewriteModels(data) {
-  const select = $("rewriteModelSelect");
-  select.innerHTML = "";
+  const selects = [$("rewriteModelSelect"), $("aiCopyModel")].filter(Boolean);
   const models = data.models || [];
-  if (!models.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = data.error || "未读取到模型";
-    select.appendChild(option);
-    select.disabled = true;
-    return;
-  }
-  select.disabled = false;
-  for (const model of models) {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = model.label || model.id;
-    option.selected = model.id === data.default_model;
-    select.appendChild(option);
+  for (const select of selects) {
+    select.innerHTML = "";
+    if (!models.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = data.error || "未读取到模型";
+      select.appendChild(option);
+      select.disabled = true;
+      continue;
+    }
+    select.disabled = false;
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.label || model.id;
+      option.selected = model.id === data.default_model;
+      select.appendChild(option);
+    }
   }
 }
 
@@ -1546,6 +1552,7 @@ async function loadPipeline() {
   $("pipelineTotal").textContent = String(remixState.pipelineItems.length);
   renderPipelineList();
   renderPipelineWorkspace();
+  populateAiCopyProjects();
 }
 
 function filteredPipelineItems() {
@@ -1849,6 +1856,317 @@ function escapeHtmlAttribute(value) {
   return escapeHtml(value);
 }
 
+function aiCopyPayload() {
+  return {
+    text: $("aiCopySource").value.trim(),
+    provider: $("aiCopyProvider").value,
+    task: $("aiCopyTask").value,
+    strength: $("aiCopyStrength").value,
+    allow_emoji: $("aiCopyEmoji").checked,
+    candidate_count: Number($("aiCopyCandidateCount").value || 3),
+    model: $("aiCopyModel").value,
+  };
+}
+
+function setAiCopyStatus(text, kind = "") {
+  const status = $("aiCopyStatus");
+  status.textContent = text;
+  status.className = `ai-copy-status ${kind}`.trim();
+}
+
+function updateAiCopyProviderUi() {
+  const provider = $("aiCopyProvider").value;
+  const local = provider === "lmstudio";
+  $("aiCopyModelField").hidden = !local;
+  $("aiCopyPastePanel").hidden = local;
+  $("aiCopyCopyPromptBtn").hidden = local;
+  $("aiCopyGenerateBtn").textContent = local
+    ? "使用 LM Studio 生成"
+    : provider === "gemini"
+      ? "复制提示词并打开 Gemini"
+      : "复制提示词并打开 ChatGPT";
+  $("aiCopyWebHint").hidden = local;
+  setAiCopyStatus(local ? "本地模型模式" : "网页版辅助模式");
+}
+
+async function runAiCopy() {
+  const payload = aiCopyPayload();
+  if (!payload.text) {
+    $("aiCopySource").focus();
+    throw new Error("请先输入原始文案");
+  }
+  if (payload.provider === "lmstudio") {
+    await generateAiCopyLocally(payload);
+  } else {
+    await openAiCopyWebProvider(payload, true);
+  }
+}
+
+async function generateAiCopyLocally(payload) {
+  const button = $("aiCopyGenerateBtn");
+  const progress = startManualButtonProgress(button);
+  button.disabled = true;
+  setAiCopyStatus("LM Studio 生成中", "busy");
+  try {
+    const data = await api("/api/remix/ai-copy/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    remixState.aiCopyPrompt = data.prompt || "";
+    remixState.aiCopyHistoryId = "";
+    renderAiCopyCandidates(data.suggestions || []);
+    setAiCopyStatus(`生成完成 · ${data.model || "本地模型"}`, "success");
+    progress.stop(true);
+  } catch (error) {
+    progress.stop(false);
+    setAiCopyStatus(error.message || "生成失败", "error");
+    throw error;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function openAiCopyWebProvider(payload = aiCopyPayload(), openPage = true) {
+  if (!payload.text) throw new Error("请先输入原始文案");
+  const popup = openPage ? window.open("about:blank", "_blank") : null;
+  setAiCopyStatus("正在准备网页提示词", "busy");
+  try {
+    const data = await api("/api/remix/ai-copy/web-prompt", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    remixState.aiCopyPrompt = data.prompt || "";
+    await navigator.clipboard.writeText(data.prompt || "");
+    if (openPage) {
+      if (popup) {
+        popup.location.href = data.url;
+      } else {
+        setAiCopyStatus("提示词已复制，浏览器阻止了新窗口", "warning");
+        return;
+      }
+    }
+    setAiCopyStatus(openPage ? "提示词已复制，网页已打开" : "提示词已复制", "success");
+  } catch (error) {
+    if (popup) popup.close();
+    setAiCopyStatus(error.message || "网页提示词生成失败", "error");
+    throw error;
+  }
+}
+
+async function parseAiCopyPastedResult() {
+  const text = $("aiCopyPastedResult").value.trim();
+  if (!text) throw new Error("请先粘贴网页模型返回内容");
+  const data = await api("/api/remix/ai-copy/parse", {
+    method: "POST",
+    body: JSON.stringify({
+      text,
+      candidate_count: Number($("aiCopyCandidateCount").value || 3),
+    }),
+  });
+  remixState.aiCopyHistoryId = "";
+  renderAiCopyCandidates(data.suggestions || []);
+  setAiCopyStatus(`已解析 ${data.suggestions?.length || 0} 个候选`, "success");
+}
+
+function renderAiCopyCandidates(suggestions) {
+  remixState.aiCopySuggestions = suggestions;
+  const box = $("aiCopyCandidates");
+  box.innerHTML = "";
+  if (!suggestions.length) {
+    box.innerHTML = '<div class="ai-copy-empty">未解析到候选，可保留原始回答并手动编辑。</div>';
+    $("aiCopySaveHistoryBtn").disabled = true;
+    return;
+  }
+  suggestions.forEach((suggestion, index) => {
+    const card = document.createElement("article");
+    card.className = "ai-copy-candidate";
+    const header = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `候选 ${index + 1}`;
+    const actions = document.createElement("div");
+    const choose = document.createElement("button");
+    choose.type = "button";
+    choose.className = "text-btn";
+    choose.textContent = "采用";
+    choose.addEventListener("click", () => selectAiCopyCandidate(suggestion, card));
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "text-btn";
+    copy.textContent = "复制";
+    copy.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(suggestion);
+      setAiCopyStatus(`已复制候选 ${index + 1}`, "success");
+    });
+    actions.append(choose, copy);
+    header.append(label, actions);
+    const text = document.createElement("p");
+    text.textContent = suggestion;
+    card.append(header, text);
+    box.appendChild(card);
+  });
+  selectAiCopyCandidate(suggestions[0], box.querySelector(".ai-copy-candidate"));
+  $("aiCopySaveHistoryBtn").disabled = false;
+}
+
+function selectAiCopyCandidate(suggestion, card) {
+  document.querySelectorAll(".ai-copy-candidate").forEach((item) => item.classList.toggle("is-selected", item === card));
+  $("aiCopySelectedResult").value = suggestion;
+  updateAiCopyResultActions();
+}
+
+function updateAiCopyResultActions() {
+  const hasResult = Boolean($("aiCopySelectedResult").value.trim());
+  $("aiCopyCopyResultBtn").disabled = !hasResult;
+  $("aiCopyBackfillBtn").disabled = !hasResult || !$("aiCopyProject").value;
+}
+
+function populateAiCopyProjects() {
+  const select = $("aiCopyProject");
+  const current = select.value;
+  select.innerHTML = '<option value="">不关联项目</option>';
+  for (const item of remixState.pipelineItems) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.title || item.url || item.id;
+    select.appendChild(option);
+  }
+  select.value = remixState.pipelineItems.some((item) => item.id === current) ? current : "";
+  updateAiCopyResultActions();
+}
+
+function loadAiCopyProjectText() {
+  const item = remixState.pipelineItems.find((candidate) => candidate.id === $("aiCopyProject").value);
+  if (!item) throw new Error("请先选择关联素材项目");
+  const task = $("aiCopyTask").value;
+  const value = task === "title"
+    ? item.title
+    : task === "tags"
+      ? (item.tags || []).map((tag) => `#${tag}`).join(" ")
+      : task === "xiaohongshu" || task === "douyin"
+        ? [item.title, item.body, (item.tags || []).map((tag) => `#${tag}`).join(" ")].filter(Boolean).join("\n\n")
+        : item.body;
+  $("aiCopySource").value = value || "";
+  setAiCopyStatus("已载入项目文案", "success");
+}
+
+async function backfillAiCopyResult() {
+  const id = $("aiCopyProject").value;
+  const selected = $("aiCopySelectedResult").value.trim();
+  if (!id || !selected) throw new Error("请选择项目并采用一个结果");
+  const task = $("aiCopyTask").value;
+  const changes = task === "title"
+    ? { title: selected }
+    : task === "tags"
+      ? { tags: tagsFromText(selected) }
+      : { body: selected };
+  await api("/api/remix/pipeline/update", {
+    method: "POST",
+    body: JSON.stringify({ id, changes }),
+  });
+  await loadPipeline();
+  $("aiCopyProject").value = id;
+  setAiCopyStatus("已回填素材项目", "success");
+}
+
+async function saveAiCopyHistory() {
+  const payload = aiCopyPayload();
+  const data = await api("/api/remix/ai-copy/history/save", {
+    method: "POST",
+    body: JSON.stringify({
+      id: remixState.aiCopyHistoryId,
+      provider: payload.provider,
+      model: payload.model,
+      task: payload.task,
+      strength: payload.strength,
+      allow_emoji: payload.allow_emoji,
+      source_text: payload.text,
+      prompt: remixState.aiCopyPrompt,
+      suggestions: remixState.aiCopySuggestions,
+      selected_text: $("aiCopySelectedResult").value.trim(),
+      pipeline_item_id: $("aiCopyProject").value,
+    }),
+  });
+  remixState.aiCopyHistoryId = data.item.id;
+  await loadAiCopyHistory();
+  setAiCopyStatus("已保存到本地历史", "success");
+}
+
+async function loadAiCopyHistory() {
+  const data = await api("/api/remix/ai-copy/history");
+  remixState.aiCopyHistory = data.items || [];
+  renderAiCopyHistory();
+}
+
+function renderAiCopyHistory() {
+  const list = $("aiCopyHistoryList");
+  list.innerHTML = "";
+  if (!remixState.aiCopyHistory.length) {
+    list.textContent = "暂无 AI 文案历史";
+    return;
+  }
+  for (const item of remixState.aiCopyHistory) {
+    const card = document.createElement("article");
+    card.className = "ai-copy-history-item";
+    const summary = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.selected_text || item.suggestions?.[0] || item.source_text || "未命名文案";
+    const meta = document.createElement("span");
+    meta.textContent = `${aiCopyProviderName(item.provider)} · ${aiCopyTaskName(item.task)}`;
+    summary.append(title, meta);
+    const actions = document.createElement("div");
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "text-btn";
+    restore.textContent = "恢复";
+    restore.addEventListener("click", () => restoreAiCopyHistory(item));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "text-btn danger-text-btn";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => deleteAiCopyHistoryItem(item.id));
+    actions.append(restore, remove);
+    card.append(summary, actions);
+    list.appendChild(card);
+  }
+}
+
+function restoreAiCopyHistory(item) {
+  remixState.aiCopyHistoryId = item.id;
+  remixState.aiCopyPrompt = item.prompt || "";
+  $("aiCopyProvider").value = item.provider || "lmstudio";
+  $("aiCopyTask").value = item.task || "body";
+  $("aiCopyStrength").value = item.strength || "standard";
+  $("aiCopyEmoji").checked = Boolean(item.allow_emoji);
+  $("aiCopySource").value = item.source_text || "";
+  $("aiCopyProject").value = item.pipeline_item_id || "";
+  if (item.model && [...$("aiCopyModel").options].some((option) => option.value === item.model)) {
+    $("aiCopyModel").value = item.model;
+  }
+  updateAiCopyProviderUi();
+  renderAiCopyCandidates(item.suggestions || []);
+  if (item.selected_text) $("aiCopySelectedResult").value = item.selected_text;
+  updateAiCopyResultActions();
+  setAiCopyStatus("已恢复历史记录", "success");
+}
+
+async function deleteAiCopyHistoryItem(id) {
+  await api("/api/remix/ai-copy/history/delete", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+  if (remixState.aiCopyHistoryId === id) remixState.aiCopyHistoryId = "";
+  await loadAiCopyHistory();
+  setAiCopyStatus("历史记录已删除");
+}
+
+function aiCopyProviderName(provider) {
+  return { lmstudio: "LM Studio", gemini: "Gemini 网页版", chatgpt: "ChatGPT 网页版" }[provider] || provider;
+}
+
+function aiCopyTaskName(task) {
+  return { title: "标题", body: "正文", tags: "标签", xiaohongshu: "小红书", douyin: "抖音" }[task] || task;
+}
+
 function writeResult(data) {
   console.debug("remix result", data);
 }
@@ -1888,6 +2206,20 @@ bind("pipelineScoreBtn", scorePipelineProduct);
 bind("pipelineRewriteBtn", rewritePipelineItems);
 bind("pipelineSaveImagesBtn", savePipelineImages);
 bind("pipelineAuditBtn", auditPipelineItem);
+bind("aiCopyGenerateBtn", runAiCopy);
+bind("aiCopyCopyPromptBtn", () => openAiCopyWebProvider(aiCopyPayload(), false));
+bind("aiCopyParseBtn", parseAiCopyPastedResult);
+bind("aiCopyLoadProjectBtn", loadAiCopyProjectText);
+bind("aiCopyCopyResultBtn", async () => {
+  await navigator.clipboard.writeText($("aiCopySelectedResult").value.trim());
+  setAiCopyStatus("结果已复制", "success");
+});
+bind("aiCopyBackfillBtn", backfillAiCopyResult);
+bind("aiCopySaveHistoryBtn", saveAiCopyHistory);
+bind("aiCopyRefreshHistoryBtn", loadAiCopyHistory);
+$("aiCopyProvider").addEventListener("change", updateAiCopyProviderUi);
+$("aiCopyProject").addEventListener("change", updateAiCopyResultActions);
+$("aiCopySelectedResult").addEventListener("input", updateAiCopyResultActions);
 $("pipelineSearch").addEventListener("input", renderPipelineList);
 $("pipelineStatusFilter").addEventListener("change", renderPipelineList);
 document.querySelectorAll("[data-pipeline-step]").forEach((button) => {
@@ -2034,3 +2366,9 @@ loadPackageHistory().catch((error) => {
 loadPipeline().catch((error) => {
   $("pipelineList").textContent = `素材池加载失败：${error.message}`;
 });
+
+loadAiCopyHistory().catch((error) => {
+  $("aiCopyHistoryList").textContent = `历史加载失败：${error.message}`;
+});
+
+updateAiCopyProviderUi();

@@ -19,6 +19,14 @@ from typing import Any, Dict, List
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from workflow.bgm_library import bgm_source_catalog, download_bgm_from_url
+from workflow.ai_copy import (
+    delete_ai_copy_history,
+    generate_ai_copy_with_lmstudio,
+    list_ai_copy_history,
+    parse_ai_copy_candidates,
+    save_ai_copy_history,
+    web_ai_copy_prompt,
+)
 from workflow.cli import align_project, audio_duration_seconds
 from workflow.content_pipeline import (
     add_pool_links,
@@ -2963,6 +2971,9 @@ def _make_handler(root: Path):
             if path == "/api/remix/pipeline":
                 self._json(list_pool_items(root))
                 return
+            if path == "/api/remix/ai-copy/history":
+                self._json(list_ai_copy_history(root))
+                return
             if path == "/api/remix/content/jianying-job":
                 job_id = parse_qs(parsed.query).get("id", [""])[0]
                 self._json(jianying_automation_job_status(job_id))
@@ -3083,6 +3094,29 @@ def _make_handler(root: Path):
                 if path == "/api/remix/pipeline/audit":
                     item_id = str(payload.get("id") or "")
                     self._json({"ok": True, "id": item_id, "audit": audit_pool_item(root, item_id)})
+                    return
+                if path == "/api/remix/ai-copy/generate":
+                    self._json(generate_ai_copy_with_lmstudio(payload))
+                    return
+                if path == "/api/remix/ai-copy/web-prompt":
+                    self._json(web_ai_copy_prompt(payload))
+                    return
+                if path == "/api/remix/ai-copy/parse":
+                    self._json(
+                        {
+                            "ok": True,
+                            "suggestions": parse_ai_copy_candidates(
+                                str(payload.get("text") or ""),
+                                int(payload.get("candidate_count") or 3),
+                            ),
+                        }
+                    )
+                    return
+                if path == "/api/remix/ai-copy/history/save":
+                    self._json(save_ai_copy_history(root, payload))
+                    return
+                if path == "/api/remix/ai-copy/history/delete":
+                    self._json(delete_ai_copy_history(root, str(payload.get("id") or "")))
                     return
                 if path == "/api/remix/affiliate-plan":
                     self._json(create_affiliate_remix_plan(payload.get("analysis") or payload, payload))

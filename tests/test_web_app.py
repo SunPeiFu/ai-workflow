@@ -20,6 +20,7 @@ from workflow.web_app import (
     list_voices,
     list_projects,
     list_remix_packages,
+    open_douyin_content_folder,
     open_xiaohongshu_content_folder,
     package_platform_publish,
     performance_insights,
@@ -42,6 +43,7 @@ from workflow.web_app import (
     save_project_performance,
     save_remix_package_file,
     selected_platform_presets,
+    start_douyin_note_generation,
     start_jianying_automation_job,
     start_jianying_content_generation,
     start_xiaohongshu_note_generation,
@@ -53,6 +55,131 @@ from workflow.web_app import (
 
 
 class WebAppTest(unittest.TestCase):
+    def test_open_douyin_content_folder_prefers_generated_note_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_url = "https://v.douyin.com/open-note/"
+            remix_dir = root / "remix_packages" / "remix" / "source"
+            note_dir = root / "remix_packages" / "douyin-note" / "note"
+            remix_dir.mkdir(parents=True)
+            note_dir.mkdir(parents=True)
+            analysis = {
+                "url": source_url,
+                "platform": "douyin",
+                "copywriting": {"title": "打开抖音图文包"},
+            }
+            for package_dir in (remix_dir, note_dir):
+                (package_dir / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            content_id = list_remix_packages(root)["contents"][0]["id"]
+            with patch("workflow.web_app.subprocess.run") as run:
+                run.return_value.returncode = 0
+                result = open_douyin_content_folder(root, content_id)
+
+            self.assertTrue(result["opened_folder"])
+            self.assertEqual(result["package_group"], "douyin-note")
+            self.assertEqual(Path(result["folder"]), note_dir.resolve())
+
+    def test_open_douyin_content_folder_falls_back_to_xiaohongshu_materials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            xhs_dir = root / "remix_packages" / "xiaohongshu-note" / "source"
+            xhs_dir.mkdir(parents=True)
+            analysis = {
+                "url": "https://www.xiaohongshu.com/explore/douyin-folder",
+                "platform": "xiaohongshu",
+                "copywriting": {"title": "尚未生成抖音包"},
+            }
+            (xhs_dir / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            content_id = list_remix_packages(root)["contents"][0]["id"]
+            with patch("workflow.web_app.subprocess.run") as run:
+                run.return_value.returncode = 0
+                result = open_douyin_content_folder(root, content_id)
+
+            self.assertTrue(result["opened_folder"])
+            self.assertEqual(result["package_group"], "xiaohongshu-note")
+            self.assertEqual(Path(result["folder"]), xhs_dir.resolve())
+
+    def test_start_douyin_note_generation_creates_platform_package_from_xiaohongshu_materials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_url = "https://www.xiaohongshu.com/explore/douyin-package"
+            remix_dir = root / "remix_packages" / "remix" / "source"
+            xhs_dir = root / "remix_packages" / "xiaohongshu-note" / "xhs-note"
+            remix_dir.mkdir(parents=True)
+            (xhs_dir / "images").mkdir(parents=True)
+            source_image = remix_dir / "old.jpg"
+            xhs_image = xhs_dir / "images" / "01-current.jpg"
+            source_image.write_bytes(b"old")
+            xhs_image.write_bytes(b"current")
+            source_analysis = {
+                "url": source_url,
+                "platform": "xiaohongshu",
+                "copywriting": {
+                    "title": "柠檬水怎么选？一篇帮你讲清楚🍋",
+                    "body": "原始长正文。",
+                    "tags": ["柠檬水"],
+                },
+                "images": [{"url": str(source_image)}],
+            }
+            xhs_analysis = {
+                "url": source_url,
+                "platform": "xiaohongshu",
+                "copywriting": {
+                    "title": "柠檬水怎么选？一篇帮你讲清楚🍋",
+                    "body": "先说结论。小白瓶适合日常，绿色瓶适合运动后，粉色瓶适合关注轻负担的人群。",
+                    "tags": ["柠檬水", "运动饮品", "好物分享", "日常饮品"],
+                },
+                "images": [{"url": str(xhs_image)}],
+            }
+            (remix_dir / "analysis.json").write_text(json.dumps(source_analysis, ensure_ascii=False), encoding="utf-8")
+            (xhs_dir / "analysis.json").write_text(json.dumps(xhs_analysis, ensure_ascii=False), encoding="utf-8")
+
+            content_id = list_remix_packages(root)["contents"][0]["id"]
+            result = start_douyin_note_generation(root, content_id)
+
+            note_dir = Path(result["note_dir"])
+            self.assertTrue((note_dir / "抖音图文.md").exists())
+            self.assertTrue((note_dir / "图片顺序.md").exists())
+            self.assertTrue((note_dir / "发布清单.md").exists())
+            self.assertEqual(result["package_group"], "douyin-note")
+            self.assertEqual(result["source_package_group"], "xiaohongshu-note")
+            self.assertEqual(result["image_count"], 1)
+            self.assertIn("current", next((note_dir / "images").iterdir()).name)
+            note_text = (note_dir / "抖音图文.md").read_text(encoding="utf-8")
+            self.assertIn("## 标题", note_text)
+            self.assertIn("## 正文", note_text)
+            self.assertIn("## 标签", note_text)
+            self.assertNotIn("一篇帮你讲清楚", note_text.split("## 正文", 1)[0])
+            self.assertIn("#柠檬水", note_text)
+
+    def test_start_douyin_note_generation_replaces_previous_package_for_same_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_url = "https://v.douyin.com/replace-package/"
+            remix_dir = root / "remix_packages" / "remix" / "source"
+            stale_dir = root / "remix_packages" / "douyin-note" / "old-package"
+            remix_dir.mkdir(parents=True)
+            stale_dir.mkdir(parents=True)
+            analysis = {
+                "url": source_url,
+                "platform": "douyin",
+                "copywriting": {"title": "速干短裤", "body": "训练和日常都能穿。", "tags": ["运动短裤"]},
+                "images": [],
+            }
+            for package_dir in (remix_dir, stale_dir):
+                (package_dir / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False), encoding="utf-8")
+
+            content_id = list_remix_packages(root)["contents"][0]["id"]
+            result = start_douyin_note_generation(root, content_id)
+            content = next(item for item in list_remix_packages(root)["contents"] if item["id"] == content_id)
+            douyin_packages = [package for package in content["packages"] if package["group"] == "douyin-note"]
+
+            self.assertFalse(stale_dir.exists())
+            self.assertEqual(len(douyin_packages), 1)
+            self.assertEqual(Path(result["note_dir"]).name, douyin_packages[0]["name"])
+
     def test_open_xiaohongshu_content_folder_prefers_generated_note_package(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

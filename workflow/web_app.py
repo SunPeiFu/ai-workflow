@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import shutil
 import subprocess
 import threading
@@ -568,6 +569,41 @@ def open_xiaohongshu_content_folder(root: Path, content_id: str) -> Dict[str, An
     }
 
 
+def open_douyin_content_folder(root: Path, content_id: str) -> Dict[str, Any]:
+    listing = list_remix_packages(root)
+    content = next((item for item in listing.get("contents", []) if item.get("id") == str(content_id or "")), None)
+    if not content:
+        raise ValueError("内容不存在")
+    packages = content.get("packages") or []
+    package = next((item for item in packages if item.get("group") == "douyin-note"), None)
+    if not package:
+        package = preferred_douyin_source_package(packages)
+    if not package:
+        raise ValueError("当前项目没有可打开的抖音图文素材目录")
+
+    packages_root = (root / "remix_packages").resolve()
+    folder = (packages_root / str(package.get("path") or "")).resolve()
+    if not str(folder).startswith(str(packages_root)) or folder == packages_root or not folder.is_dir():
+        raise ValueError("抖音图文素材目录无效")
+    opened_folder = subprocess.run(
+        ["open", str(folder)],
+        text=True,
+        capture_output=True,
+        check=False,
+    ).returncode == 0
+    if not opened_folder:
+        raise RuntimeError("无法打开素材文件夹，请检查 Finder 是否可用")
+    return {
+        "ok": True,
+        "content_id": content_id,
+        "title": content.get("title") or "未命名内容",
+        "package_group": package.get("group") or "",
+        "folder": str(folder),
+        "opened_folder": True,
+        "message": "已在 Finder 中打开当前抖音图文素材文件夹",
+    }
+
+
 def start_jianying_content_generation(root: Path, content_id: str, launch: bool = True) -> Dict[str, Any]:
     content, package, package_dir = resolve_jianying_content_package(root, content_id)
 
@@ -892,6 +928,56 @@ def start_xiaohongshu_note_generation(root: Path, content_id: str, source_packag
     }
 
 
+def start_douyin_note_generation(root: Path, content_id: str, source_package_path: str = "") -> Dict[str, Any]:
+    content, package, package_dir = resolve_douyin_source_package(root, content_id, source_package_path)
+    analysis = remix_package_analysis(package_dir)
+    copywriting = analysis.get("copywriting") or {}
+    title = douyin_note_title(str(copywriting.get("title") or content.get("title") or "抖音图文").strip())
+    body = douyin_note_body(str(copywriting.get("body") or "").strip(), title)
+    tags = douyin_note_tags(copywriting.get("tags") or [])
+    note_dir = root / "remix_packages" / "douyin-note" / f"{safe_path_part(title)[:40]}-抖音图文包"
+    remove_existing_platform_note_packages(root, content, "douyin-note")
+    if note_dir.exists():
+        shutil.rmtree(note_dir)
+    note_dir.mkdir(parents=True, exist_ok=True)
+
+    images = douyin_note_images(package_dir, analysis)
+    local_images = materialize_xiaohongshu_note_images(note_dir, images)
+    ordered_images = [str(path) for path in local_images] or images
+    note_analysis = dict(analysis)
+    note_analysis["platform"] = "douyin"
+    note_analysis["copywriting"] = {
+        "title": title,
+        "body": body,
+        "tags": [tag.lstrip("#") for tag in tags],
+    }
+    note_analysis["images"] = [{"url": value} for value in ordered_images]
+    (note_dir / "analysis.json").write_text(json.dumps(note_analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+    (note_dir / "抖音图文.md").write_text(douyin_note_markdown(title, body, tags), encoding="utf-8")
+    (note_dir / "图片顺序.md").write_text(douyin_image_order_markdown(ordered_images, title), encoding="utf-8")
+    (note_dir / "发布清单.md").write_text(douyin_publish_checklist(), encoding="utf-8")
+    (note_dir / "素材来源.md").write_text(
+        xiaohongshu_asset_source_markdown(package, package_dir, images, ordered_images),
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "status": "ready_for_douyin",
+        "content_id": content_id,
+        "title": title,
+        "source_url": content.get("source_url") or analysis.get("url", ""),
+        "package_group": "douyin-note",
+        "source_package_group": package.get("group") or "",
+        "source_package_path": package.get("path") or "",
+        "source_package_dir": str(package_dir),
+        "note_dir": str(note_dir),
+        "image_count": len(local_images),
+        "image_dir": str(note_dir / "images"),
+        "files": [str(path) for path in sorted(note_dir.iterdir()) if path.is_file()],
+        "message": "已生成抖音图文包，可检查标题、图片顺序和商品挂载后发布。",
+    }
+
+
 def start_xiaohongshu_publish_assistant(root: Path, content_id: str, launch: bool = True) -> Dict[str, Any]:
     content, package, note_dir = resolve_xiaohongshu_note_package(root, content_id)
     note_path = note_dir / "小红书笔记.md"
@@ -1010,10 +1096,35 @@ def resolve_xiaohongshu_source_package(root: Path, content_id: str, source_packa
     return content, package, package_dir
 
 
+def resolve_douyin_source_package(root: Path, content_id: str, source_package_path: str = "") -> tuple[Dict[str, Any], Dict[str, Any], Path]:
+    listing = list_remix_packages(root)
+    content = next((item for item in listing.get("contents", []) if item.get("id") == str(content_id or "")), None)
+    if not content:
+        raise ValueError("内容不存在")
+    packages = content.get("packages") or []
+    if source_package_path:
+        package = next((item for item in packages if item.get("path") == source_package_path), None)
+        if not package:
+            raise ValueError("指定的抖音源素材包不属于当前内容")
+    else:
+        package = preferred_douyin_source_package(packages)
+    if not package:
+        raise ValueError("缺少可用于抖音图文生成的素材包")
+    packages_root = (root / "remix_packages").resolve()
+    package_dir = (packages_root / str(package.get("path") or "")).resolve()
+    if not str(package_dir).startswith(str(packages_root)) or not package_dir.is_dir():
+        raise ValueError("抖音源素材包路径无效")
+    return content, package, package_dir
+
+
 def remove_existing_xiaohongshu_note_packages(root: Path, content: Dict[str, Any]) -> None:
+    remove_existing_platform_note_packages(root, content, "xiaohongshu-note")
+
+
+def remove_existing_platform_note_packages(root: Path, content: Dict[str, Any], group: str) -> None:
     packages_root = (root / "remix_packages").resolve()
     for package in content.get("packages") or []:
-        if package.get("group") != "xiaohongshu-note":
+        if package.get("group") != group:
             continue
         package_dir = (packages_root / package.get("path", "")).resolve()
         if str(package_dir).startswith(str(packages_root)) and package_dir.is_dir():
@@ -1377,6 +1488,80 @@ def xiaohongshu_note_tags(tags: List[Any]) -> List[str]:
     return list(dict.fromkeys(cleaned + defaults))[:8]
 
 
+def douyin_note_title(title: str) -> str:
+    value = str(title or "").replace("#", "").strip()
+    for phrase in ("一篇帮你讲清楚", "一篇看懂", "保姆级攻略", "建议收藏"):
+        value = value.replace(phrase, "")
+    value = re.sub(r"\s+", " ", value).strip(" ｜|，,。.!！?？")
+    return (value[:28].rstrip("，,。.!！?？") if len(value) > 28 else value) or "这份选择建议别错过"
+
+
+def douyin_note_body(body: str, title: str) -> str:
+    value = re.sub(r"\n{3,}", "\n\n", str(body or "").strip()).replace("小红书", "抖音")
+    if not value:
+        value = f"{title}。先看核心差异，再按自己的使用场景选择。"
+    if len(value) > 280:
+        value = value[:280].rstrip("，,。.!！?？") + "。"
+    if not re.search(r"[？?]$", value):
+        value = f"{value}\n\n你选产品时最看重哪一点？"
+    return value
+
+
+def douyin_note_tags(tags: List[Any]) -> List[str]:
+    cleaned = []
+    for tag in tags:
+        value = str(tag or "").strip().lstrip("#")
+        if value:
+            cleaned.append(f"#{value}")
+    return list(dict.fromkeys(cleaned + ["#抖音图文"]))[:5]
+
+
+def douyin_note_images(package_dir: Path, analysis: Dict[str, Any]) -> List[str]:
+    image_dir = package_dir / "images"
+    if image_dir.is_dir():
+        local_images = [
+            str(path.resolve())
+            for path in sorted(image_dir.iterdir())
+            if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        ]
+        if local_images:
+            return local_images
+    return xiaohongshu_note_images(package_dir, analysis)
+
+
+def douyin_note_markdown(title: str, body: str, tags: List[str]) -> str:
+    return (
+        "# 抖音图文发布文案\n\n"
+        f"## 标题\n{title}\n\n"
+        f"## 正文\n{body}\n\n"
+        f"## 标签\n{' '.join(tags)}\n"
+    )
+
+
+def douyin_image_order_markdown(images: List[str], title: str) -> str:
+    roles = ["痛点或结果封面", "核心差异", "商品卖点", "使用场景", "细节对比", "选择建议", "互动收尾"]
+    lines = ["# 抖音图片顺序", "", f"封面标题：{title}", ""]
+    for index, image in enumerate(images, start=1):
+        lines.append(f"{index}. {roles[min(index - 1, len(roles) - 1)]}")
+        lines.append(f"   素材：{image}")
+    if not images:
+        lines.append("- 暂无图片，请回到素材拆解页补充商品图片。")
+    return "\n".join(lines).strip() + "\n"
+
+
+def douyin_publish_checklist() -> str:
+    return """# 抖音图文发布清单
+
+- [ ] 封面在首屏直接展示商品、痛点或结果
+- [ ] 每张图片承担不同信息，不重复堆叠同一画面
+- [ ] 清理小红书水印、界面截图和平台专属措辞
+- [ ] 标题、正文和图片中的商品信息保持一致
+- [ ] 删除绝对化、医疗功效和无法证明的宣传词
+- [ ] 检查商品锚点或橱窗商品与素材一致
+- [ ] 发布前人工确认图片顺序、价格和活动信息
+"""
+
+
 def xiaohongshu_note_markdown(title: str, body: str, tags: List[str]) -> str:
     return (
         "# 小红书笔记\n\n"
@@ -1450,6 +1635,14 @@ def preferred_jianying_package(packages: List[Dict[str, Any]]) -> Dict[str, Any]
 def preferred_xiaohongshu_source_package(packages: List[Dict[str, Any]]) -> Dict[str, Any] | None:
     priority = {"remix": 0, "affiliate-jianying": 1, "jianying": 2}
     valid_packages = [package for package in packages if package.get("path") and package.get("group") != "xiaohongshu-note"]
+    if not valid_packages:
+        return None
+    return sorted(valid_packages, key=lambda package: (priority.get(package.get("group"), 9), -(int(package.get("updated_at") or 0))))[0]
+
+
+def preferred_douyin_source_package(packages: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    priority = {"xiaohongshu-note": 0, "remix": 1, "affiliate-jianying": 2, "jianying": 3}
+    valid_packages = [package for package in packages if package.get("path") and package.get("group") != "douyin-note"]
     if not valid_packages:
         return None
     return sorted(valid_packages, key=lambda package: (priority.get(package.get("group"), 9), -(int(package.get("updated_at") or 0))))[0]
@@ -2851,6 +3044,9 @@ def _make_handler(root: Path):
                 if path == "/api/remix/content/open-folder":
                     self._json(open_xiaohongshu_content_folder(root, str(payload.get("id") or "")))
                     return
+                if path == "/api/remix/content/douyin-open-folder":
+                    self._json(open_douyin_content_folder(root, str(payload.get("id") or "")))
+                    return
                 if path == "/api/remix/content/jianying-generate":
                     if payload.get("automation"):
                         self._json(start_jianying_automation_job(root, str(payload.get("id") or ""), launch=bool(payload.get("launch", True))))
@@ -2859,6 +3055,9 @@ def _make_handler(root: Path):
                     return
                 if path == "/api/remix/content/xiaohongshu-generate":
                     self._json(start_xiaohongshu_note_generation(root, str(payload.get("id") or ""), str(payload.get("source_package_path") or "")))
+                    return
+                if path == "/api/remix/content/douyin-generate":
+                    self._json(start_douyin_note_generation(root, str(payload.get("id") or ""), str(payload.get("source_package_path") or "")))
                     return
                 if path == "/api/remix/content/xiaohongshu-publish":
                     self._json(start_xiaohongshu_publish_assistant(root, str(payload.get("id") or ""), launch=bool(payload.get("launch", True))))

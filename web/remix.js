@@ -17,6 +17,16 @@ const remixState = {
   selectedContentByTab: {},
   packagePageByTab: {},
   uploadPreviewUrls: {},
+  pipelineItems: [],
+  pipelineCurrentId: "",
+  pipelineSelectedIds: new Set(),
+  pipelineStep: "pool",
+  pipelineImageOrder: [],
+  pipelineCoverImage: "",
+  aiCopySuggestions: [],
+  aiCopyPrompt: "",
+  aiCopyHistory: [],
+  aiCopyHistoryId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -517,7 +527,7 @@ function filterContentsForTab(contents, tab = remixState.activeTab) {
 
 function renderPackageHistory() {
   const tab = remixState.activeTab;
-  if (tab === "extract") return;
+  if (tab === "extract" || tab === "pipeline" || tab === "ai-copy") return;
   const contents = filterContentsForTab(remixState.packageContents, tab);
   const { list, pager } = historyElements(tab);
   if (!list) return;
@@ -1409,24 +1419,26 @@ async function loadRewriteModels() {
 }
 
 function renderRewriteModels(data) {
-  const select = $("rewriteModelSelect");
-  select.innerHTML = "";
+  const selects = [$("rewriteModelSelect"), $("aiCopyModel")].filter(Boolean);
   const models = data.models || [];
-  if (!models.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = data.error || "未读取到模型";
-    select.appendChild(option);
-    select.disabled = true;
-    return;
-  }
-  select.disabled = false;
-  for (const model of models) {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = model.label || model.id;
-    option.selected = model.id === data.default_model;
-    select.appendChild(option);
+  for (const select of selects) {
+    select.innerHTML = "";
+    if (!models.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = data.error || "未读取到模型";
+      select.appendChild(option);
+      select.disabled = true;
+      continue;
+    }
+    select.disabled = false;
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.label || model.id;
+      option.selected = model.id === data.default_model;
+      select.appendChild(option);
+    }
   }
 }
 
@@ -1515,6 +1527,636 @@ function toggleEmoji(field, button) {
   button.textContent = enabled ? "已加入 emoji" : "加入 emoji";
 }
 
+function pipelineCurrentItem() {
+  return remixState.pipelineItems.find((item) => item.id === remixState.pipelineCurrentId) || null;
+}
+
+function pipelineStatusLabel(status) {
+  return {
+    pending: "待拆解",
+    analyzed: "已拆解",
+    scored: "已评分",
+    rewritten: "已改写",
+    arranged: "已编排",
+    ready: "可发布",
+    blocked: "待修正",
+  }[status] || status || "待处理";
+}
+
+async function loadPipeline() {
+  const data = await api("/api/remix/pipeline");
+  remixState.pipelineItems = data.items || [];
+  if (!pipelineCurrentItem() && remixState.pipelineItems.length) {
+    remixState.pipelineCurrentId = remixState.pipelineItems[0].id;
+  }
+  $("pipelineTotal").textContent = String(remixState.pipelineItems.length);
+  renderPipelineList();
+  renderPipelineWorkspace();
+  populateAiCopyProjects();
+}
+
+function filteredPipelineItems() {
+  const query = $("pipelineSearch").value.trim().toLowerCase();
+  const status = $("pipelineStatusFilter").value;
+  return remixState.pipelineItems.filter((item) => {
+    const matchesQuery = !query || `${item.title || ""} ${item.url || ""}`.toLowerCase().includes(query);
+    return matchesQuery && (!status || item.status === status);
+  });
+}
+
+function renderPipelineList() {
+  const list = $("pipelineList");
+  const items = filteredPipelineItems();
+  list.innerHTML = "";
+  $("pipelineQueueMeta").textContent = `${items.length} / ${remixState.pipelineItems.length}`;
+  $("pipelineSelectedCount").textContent = remixState.pipelineSelectedIds.size
+    ? `已勾选 ${remixState.pipelineSelectedIds.size} 条`
+    : "未勾选";
+  if (!items.length) {
+    list.textContent = "暂无符合条件的内容";
+    return;
+  }
+  for (const item of items) {
+    const card = document.createElement("article");
+    card.className = "pipeline-queue-item";
+    card.classList.toggle("is-current", item.id === remixState.pipelineCurrentId);
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = remixState.pipelineSelectedIds.has(item.id);
+    checkbox.setAttribute("aria-label", `选择${item.title || item.url}`);
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) remixState.pipelineSelectedIds.add(item.id);
+      else remixState.pipelineSelectedIds.delete(item.id);
+      renderPipelineList();
+    });
+    const content = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.title || "待补充标题";
+    const source = document.createElement("span");
+    source.textContent = `${item.platform || "unknown"} · ${item.image_count || 0} 张图`;
+    const badge = document.createElement("em");
+    badge.className = `pipeline-status status-${item.status || "pending"}`;
+    badge.textContent = pipelineStatusLabel(item.status);
+    content.append(title, source);
+    card.append(checkbox, content, badge);
+    card.addEventListener("click", () => {
+      remixState.pipelineCurrentId = item.id;
+      renderPipelineList();
+      renderPipelineWorkspace();
+    });
+    list.appendChild(card);
+  }
+}
+
+function setPipelineStep(step) {
+  remixState.pipelineStep = step;
+  document.querySelectorAll("[data-pipeline-step]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.pipelineStep === step);
+  });
+  document.querySelectorAll("[data-pipeline-step-panel]").forEach((panel) => {
+    const active = panel.dataset.pipelineStepPanel === step;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  });
+  renderPipelineWorkspace();
+}
+
+function renderPipelineWorkspace() {
+  const item = pipelineCurrentItem();
+  renderPipelinePoolDetail(item);
+  renderPipelineProduct(item);
+  renderPipelineDrafts(item);
+  renderPipelineImages(item);
+  renderPipelineAudit(item);
+}
+
+function renderPipelinePoolDetail(item) {
+  const box = $("pipelinePoolDetail");
+  if (!item) {
+    box.className = "pipeline-detail-empty";
+    box.textContent = "从左侧选择一条内容，可编辑标题、正文和标签。";
+    return;
+  }
+  box.className = "pipeline-edit-form";
+  box.innerHTML = `
+    <label>标题<input id="pipelineEditTitle" value="${escapeHtmlAttribute(item.title || "")}" /></label>
+    <label>正文<textarea id="pipelineEditBody" rows="5">${escapeHtml(item.body || "")}</textarea></label>
+    <label>标签<input id="pipelineEditTags" value="${escapeHtmlAttribute((item.tags || []).map((tag) => `#${tag}`).join(" "))}" /></label>
+    <div class="pipeline-form-actions"><span>${escapeHtml(item.url || "")}</span><button id="pipelineSaveCopyBtn" class="secondary" type="button">保存文案</button></div>
+  `;
+  $("pipelineSaveCopyBtn").addEventListener("click", savePipelineCopy);
+}
+
+function renderPipelineProduct(item) {
+  $("pipelineScoreEmpty").hidden = Boolean(item);
+  $("pipelineProductForm").hidden = !item;
+  $("pipelineScoreBtn").disabled = !item;
+  const result = $("pipelineScoreResult");
+  if (!item) {
+    result.innerHTML = "";
+    return;
+  }
+  const product = item.product || {};
+  const fields = {
+    pipelineProductName: product.name,
+    pipelinePrice: product.price,
+    pipelineCommission: product.commission_rate,
+    pipelineSales: product.monthly_sales,
+    pipelineRating: product.rating,
+    pipelineStoreScore: product.store_score,
+    pipelineRefundRate: product.refund_rate,
+    pipelineAssetCompleteness: product.asset_completeness,
+  };
+  for (const [id, value] of Object.entries(fields)) $(id).value = value ?? "";
+  $("pipelineCoupon").checked = Boolean(product.has_coupon);
+  const score = item.product_score;
+  result.innerHTML = score
+    ? `<div class="pipeline-score-card"><strong>${score.score}</strong><span>${escapeHtml(score.grade)}</span><small>佣金 ${score.breakdown.commission} · 需求 ${score.breakdown.demand} · 口碑 ${score.breakdown.rating}</small></div>`
+    : "";
+}
+
+function renderPipelineDrafts(item) {
+  const box = $("pipelineDrafts");
+  if (!item || !Object.keys(item.drafts || {}).length) {
+    box.className = "pipeline-drafts pipeline-detail-empty";
+    box.textContent = "选择内容并执行改写后，在这里对比双平台草稿。";
+    return;
+  }
+  box.className = "pipeline-drafts";
+  box.innerHTML = ["xiaohongshu", "douyin"].map((platform) => {
+    const draft = item.drafts[platform] || {};
+    const name = platform === "xiaohongshu" ? "小红书" : "抖音";
+    return `<article><span>${name}</span><h3>${escapeHtml(draft.title || "")}</h3><p>${escapeHtml(draft.body || "")}</p><strong>${escapeHtml(draft.tags || "")}</strong></article>`;
+  }).join("");
+}
+
+function renderPipelineImages(item) {
+  const board = $("pipelineImageBoard");
+  $("pipelineSaveImagesBtn").disabled = !item;
+  if (!item || !(item.images || []).length) {
+    remixState.pipelineImageOrder = [];
+    remixState.pipelineCoverImage = "";
+    board.className = "pipeline-image-board pipeline-detail-empty";
+    board.textContent = "当前内容没有图片，请先在素材拆解中上传或保留图片。";
+    return;
+  }
+  remixState.pipelineImageOrder = [...item.images];
+  remixState.pipelineCoverImage = imageValue(item.cover_image) || imageValue(item.images[0]);
+  board.className = "pipeline-image-board";
+  drawPipelineImageBoard();
+}
+
+function drawPipelineImageBoard() {
+  const board = $("pipelineImageBoard");
+  board.innerHTML = "";
+  remixState.pipelineImageOrder.forEach((image, index) => {
+    const value = imageValue(image);
+    const card = document.createElement("article");
+    card.className = "pipeline-image-item";
+    card.draggable = true;
+    card.dataset.index = String(index);
+    card.innerHTML = `
+      <img src="${escapeHtmlAttribute(imagePreviewUrl(image))}" alt="第 ${index + 1} 张图片" />
+      <div><strong>${index + 1}</strong><button type="button" data-cover="${escapeHtmlAttribute(value)}">${value === remixState.pipelineCoverImage ? "当前封面" : "设为封面"}</button><button type="button" data-remove="${index}">移除</button></div>
+    `;
+    card.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", String(index)));
+    card.addEventListener("dragover", (event) => event.preventDefault());
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const from = Number(event.dataTransfer.getData("text/plain"));
+      const to = index;
+      const [moved] = remixState.pipelineImageOrder.splice(from, 1);
+      remixState.pipelineImageOrder.splice(to, 0, moved);
+      drawPipelineImageBoard();
+    });
+    card.querySelector("[data-cover]").addEventListener("click", () => {
+      remixState.pipelineCoverImage = value;
+      drawPipelineImageBoard();
+    });
+    card.querySelector("[data-remove]").addEventListener("click", () => {
+      remixState.pipelineImageOrder.splice(index, 1);
+      if (!remixState.pipelineImageOrder.some((candidate) => imageValue(candidate) === remixState.pipelineCoverImage)) {
+        remixState.pipelineCoverImage = imageValue(remixState.pipelineImageOrder[0]);
+      }
+      drawPipelineImageBoard();
+    });
+    board.appendChild(card);
+  });
+}
+
+function renderPipelineAudit(item) {
+  const box = $("pipelineAuditResult");
+  $("pipelineAuditBtn").disabled = !item;
+  const audit = item?.audit;
+  if (!audit) {
+    box.className = "pipeline-audit-result pipeline-detail-empty";
+    box.textContent = item ? "点击运行质检，检查发布阻断项。" : "选择内容后检查文案风险、图片、封面和商品信息。";
+    return;
+  }
+  box.className = `pipeline-audit-result ${audit.ready_to_publish ? "is-ready" : "is-blocked"}`;
+  const issues = (audit.issues || []).map((issue) => `<li class="${issue.severity}"><strong>${issue.severity === "blocker" ? "必须修正" : "建议优化"}</strong>${escapeHtml(issue.message)}</li>`).join("");
+  box.innerHTML = `<div class="pipeline-audit-score"><strong>${audit.score}</strong><span>${audit.ready_to_publish ? "可以发布" : "暂不可发布"}</span></div><ul>${issues || "<li class='pass'>关键检查项均已通过</li>"}</ul>`;
+}
+
+async function addPipelineLinks() {
+  const text = $("pipelineLinks").value.trim();
+  if (!text) throw new Error("请先粘贴分享链接或分享文字");
+  const data = await api("/api/remix/pipeline/add", { method: "POST", body: JSON.stringify({ text }) });
+  $("pipelineLinks").value = "";
+  await loadPipeline();
+  setRemixStatus(`已加入 ${data.added} 条素材`);
+}
+
+async function savePipelineCopy() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  await api("/api/remix/pipeline/update", {
+    method: "POST",
+    body: JSON.stringify({
+      id: item.id,
+      changes: {
+        title: $("pipelineEditTitle").value.trim(),
+        body: $("pipelineEditBody").value.trim(),
+        tags: tagsFromText($("pipelineEditTags").value),
+        status: item.status === "pending" ? "analyzed" : item.status,
+      },
+    }),
+  });
+  await loadPipeline();
+  setRemixStatus("素材文案已保存");
+}
+
+async function scorePipelineProduct() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  const product = {
+    name: $("pipelineProductName").value.trim(),
+    price: Number($("pipelinePrice").value || 0),
+    commission_rate: Number($("pipelineCommission").value || 0),
+    monthly_sales: Number($("pipelineSales").value || 0),
+    rating: Number($("pipelineRating").value || 0),
+    store_score: Number($("pipelineStoreScore").value || 0),
+    refund_rate: Number($("pipelineRefundRate").value || 0),
+    asset_completeness: Number($("pipelineAssetCompleteness").value || 0),
+    has_coupon: $("pipelineCoupon").checked,
+  };
+  await api("/api/remix/pipeline/product", { method: "POST", body: JSON.stringify({ id: item.id, product }) });
+  await loadPipeline();
+  setRemixStatus("选品评分已更新");
+}
+
+async function rewritePipelineItems() {
+  const ids = remixState.pipelineSelectedIds.size
+    ? [...remixState.pipelineSelectedIds]
+    : [remixState.pipelineCurrentId].filter(Boolean);
+  if (!ids.length) throw new Error("请先选择需要改写的内容");
+  await api("/api/remix/pipeline/rewrite", {
+    method: "POST",
+    body: JSON.stringify({ ids, level: $("pipelineRewriteLevel").value }),
+  });
+  await loadPipeline();
+  setRemixStatus(`已生成 ${ids.length} 条双平台草稿`);
+}
+
+async function savePipelineImages() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  await api("/api/remix/pipeline/images", {
+    method: "POST",
+    body: JSON.stringify({
+      id: item.id,
+      images: remixState.pipelineImageOrder,
+      cover_image: remixState.pipelineCoverImage,
+    }),
+  });
+  await loadPipeline();
+  setRemixStatus("图片顺序与封面已保存");
+}
+
+async function auditPipelineItem() {
+  const item = pipelineCurrentItem();
+  if (!item) return;
+  await api("/api/remix/pipeline/audit", { method: "POST", body: JSON.stringify({ id: item.id }) });
+  await loadPipeline();
+  setRemixStatus("发布质检已完成");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character]);
+}
+
+function escapeHtmlAttribute(value) {
+  return escapeHtml(value);
+}
+
+function aiCopyPayload() {
+  return {
+    text: $("aiCopySource").value.trim(),
+    provider: $("aiCopyProvider").value,
+    task: $("aiCopyTask").value,
+    strength: $("aiCopyStrength").value,
+    allow_emoji: $("aiCopyEmoji").checked,
+    candidate_count: Number($("aiCopyCandidateCount").value || 3),
+    model: $("aiCopyModel").value,
+  };
+}
+
+function setAiCopyStatus(text, kind = "") {
+  const status = $("aiCopyStatus");
+  status.textContent = text;
+  status.className = `ai-copy-status ${kind}`.trim();
+}
+
+function updateAiCopyProviderUi() {
+  const provider = $("aiCopyProvider").value;
+  const local = provider === "lmstudio";
+  $("aiCopyModelField").hidden = !local;
+  $("aiCopyPastePanel").hidden = local;
+  $("aiCopyCopyPromptBtn").hidden = local;
+  $("aiCopyGenerateBtn").textContent = local
+    ? "使用 LM Studio 生成"
+    : provider === "gemini"
+      ? "复制提示词并打开 Gemini"
+      : "复制提示词并打开 ChatGPT";
+  $("aiCopyWebHint").hidden = local;
+  setAiCopyStatus(local ? "本地模型模式" : "网页版辅助模式");
+}
+
+async function runAiCopy() {
+  const payload = aiCopyPayload();
+  if (!payload.text) {
+    $("aiCopySource").focus();
+    throw new Error("请先输入原始文案");
+  }
+  if (payload.provider === "lmstudio") {
+    await generateAiCopyLocally(payload);
+  } else {
+    await openAiCopyWebProvider(payload, true);
+  }
+}
+
+async function generateAiCopyLocally(payload) {
+  const button = $("aiCopyGenerateBtn");
+  const progress = startManualButtonProgress(button);
+  button.disabled = true;
+  setAiCopyStatus("LM Studio 生成中", "busy");
+  try {
+    const data = await api("/api/remix/ai-copy/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    remixState.aiCopyPrompt = data.prompt || "";
+    remixState.aiCopyHistoryId = "";
+    renderAiCopyCandidates(data.suggestions || []);
+    setAiCopyStatus(`生成完成 · ${data.model || "本地模型"}`, "success");
+    progress.stop(true);
+  } catch (error) {
+    progress.stop(false);
+    setAiCopyStatus(error.message || "生成失败", "error");
+    throw error;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function openAiCopyWebProvider(payload = aiCopyPayload(), openPage = true) {
+  if (!payload.text) throw new Error("请先输入原始文案");
+  setAiCopyStatus("正在准备网页提示词", "busy");
+  try {
+    const data = await api(openPage ? "/api/remix/ai-copy/open-web" : "/api/remix/ai-copy/web-prompt", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    remixState.aiCopyPrompt = data.prompt || "";
+    await navigator.clipboard.writeText(data.prompt || "");
+    setAiCopyStatus(openPage ? data.message || "网页已打开并尝试粘贴" : "提示词已复制", data.paste_attempted === false ? "warning" : "success");
+  } catch (error) {
+    setAiCopyStatus(error.message || "网页提示词生成失败", "error");
+    throw error;
+  }
+}
+
+async function parseAiCopyPastedResult() {
+  const text = $("aiCopyPastedResult").value.trim();
+  if (!text) throw new Error("请先粘贴网页模型返回内容");
+  const data = await api("/api/remix/ai-copy/parse", {
+    method: "POST",
+    body: JSON.stringify({
+      text,
+      candidate_count: Number($("aiCopyCandidateCount").value || 3),
+    }),
+  });
+  remixState.aiCopyHistoryId = "";
+  renderAiCopyCandidates(data.suggestions || []);
+  setAiCopyStatus(`已解析 ${data.suggestions?.length || 0} 个候选`, "success");
+}
+
+function renderAiCopyCandidates(suggestions) {
+  remixState.aiCopySuggestions = suggestions;
+  const box = $("aiCopyCandidates");
+  box.innerHTML = "";
+  if (!suggestions.length) {
+    box.innerHTML = '<div class="ai-copy-empty">未解析到候选，可保留原始回答并手动编辑。</div>';
+    $("aiCopySaveHistoryBtn").disabled = true;
+    return;
+  }
+  suggestions.forEach((suggestion, index) => {
+    const card = document.createElement("article");
+    card.className = "ai-copy-candidate";
+    const header = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `候选 ${index + 1}`;
+    const actions = document.createElement("div");
+    const choose = document.createElement("button");
+    choose.type = "button";
+    choose.className = "text-btn";
+    choose.textContent = "采用";
+    choose.addEventListener("click", () => selectAiCopyCandidate(suggestion, card));
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "text-btn";
+    copy.textContent = "复制";
+    copy.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(suggestion);
+      setAiCopyStatus(`已复制候选 ${index + 1}`, "success");
+    });
+    actions.append(choose, copy);
+    header.append(label, actions);
+    const text = document.createElement("p");
+    text.textContent = suggestion;
+    card.append(header, text);
+    box.appendChild(card);
+  });
+  selectAiCopyCandidate(suggestions[0], box.querySelector(".ai-copy-candidate"));
+  $("aiCopySaveHistoryBtn").disabled = false;
+}
+
+function selectAiCopyCandidate(suggestion, card) {
+  document.querySelectorAll(".ai-copy-candidate").forEach((item) => item.classList.toggle("is-selected", item === card));
+  $("aiCopySelectedResult").value = suggestion;
+  updateAiCopyResultActions();
+}
+
+function updateAiCopyResultActions() {
+  const hasResult = Boolean($("aiCopySelectedResult").value.trim());
+  $("aiCopyCopyResultBtn").disabled = !hasResult;
+  $("aiCopyBackfillBtn").disabled = !hasResult || !$("aiCopyProject").value;
+}
+
+function populateAiCopyProjects() {
+  const select = $("aiCopyProject");
+  const current = select.value;
+  select.innerHTML = '<option value="">不关联项目</option>';
+  for (const item of remixState.pipelineItems) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.title || item.url || item.id;
+    select.appendChild(option);
+  }
+  select.value = remixState.pipelineItems.some((item) => item.id === current) ? current : "";
+  updateAiCopyResultActions();
+}
+
+function loadAiCopyProjectText() {
+  const item = remixState.pipelineItems.find((candidate) => candidate.id === $("aiCopyProject").value);
+  if (!item) throw new Error("请先选择关联素材项目");
+  const task = $("aiCopyTask").value;
+  const value = task === "title"
+    ? item.title
+    : task === "tags"
+      ? (item.tags || []).map((tag) => `#${tag}`).join(" ")
+      : task === "xiaohongshu" || task === "douyin"
+        ? [item.title, item.body, (item.tags || []).map((tag) => `#${tag}`).join(" ")].filter(Boolean).join("\n\n")
+        : item.body;
+  $("aiCopySource").value = value || "";
+  setAiCopyStatus("已载入项目文案", "success");
+}
+
+async function backfillAiCopyResult() {
+  const id = $("aiCopyProject").value;
+  const selected = $("aiCopySelectedResult").value.trim();
+  if (!id || !selected) throw new Error("请选择项目并采用一个结果");
+  const task = $("aiCopyTask").value;
+  const changes = task === "title"
+    ? { title: selected }
+    : task === "tags"
+      ? { tags: tagsFromText(selected) }
+      : { body: selected };
+  await api("/api/remix/pipeline/update", {
+    method: "POST",
+    body: JSON.stringify({ id, changes }),
+  });
+  await loadPipeline();
+  $("aiCopyProject").value = id;
+  setAiCopyStatus("已回填素材项目", "success");
+}
+
+async function saveAiCopyHistory() {
+  const payload = aiCopyPayload();
+  const data = await api("/api/remix/ai-copy/history/save", {
+    method: "POST",
+    body: JSON.stringify({
+      id: remixState.aiCopyHistoryId,
+      provider: payload.provider,
+      model: payload.model,
+      task: payload.task,
+      strength: payload.strength,
+      allow_emoji: payload.allow_emoji,
+      source_text: payload.text,
+      prompt: remixState.aiCopyPrompt,
+      suggestions: remixState.aiCopySuggestions,
+      selected_text: $("aiCopySelectedResult").value.trim(),
+      pipeline_item_id: $("aiCopyProject").value,
+    }),
+  });
+  remixState.aiCopyHistoryId = data.item.id;
+  await loadAiCopyHistory();
+  setAiCopyStatus("已保存到本地历史", "success");
+}
+
+async function loadAiCopyHistory() {
+  const data = await api("/api/remix/ai-copy/history");
+  remixState.aiCopyHistory = data.items || [];
+  renderAiCopyHistory();
+}
+
+function renderAiCopyHistory() {
+  const list = $("aiCopyHistoryList");
+  list.innerHTML = "";
+  if (!remixState.aiCopyHistory.length) {
+    list.textContent = "暂无 AI 文案历史";
+    return;
+  }
+  for (const item of remixState.aiCopyHistory) {
+    const card = document.createElement("article");
+    card.className = "ai-copy-history-item";
+    const summary = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.selected_text || item.suggestions?.[0] || item.source_text || "未命名文案";
+    const meta = document.createElement("span");
+    meta.textContent = `${aiCopyProviderName(item.provider)} · ${aiCopyTaskName(item.task)}`;
+    summary.append(title, meta);
+    const actions = document.createElement("div");
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "text-btn";
+    restore.textContent = "恢复";
+    restore.addEventListener("click", () => restoreAiCopyHistory(item));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "text-btn danger-text-btn";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => deleteAiCopyHistoryItem(item.id));
+    actions.append(restore, remove);
+    card.append(summary, actions);
+    list.appendChild(card);
+  }
+}
+
+function restoreAiCopyHistory(item) {
+  remixState.aiCopyHistoryId = item.id;
+  remixState.aiCopyPrompt = item.prompt || "";
+  $("aiCopyProvider").value = item.provider || "lmstudio";
+  $("aiCopyTask").value = item.task || "body";
+  $("aiCopyStrength").value = item.strength || "standard";
+  $("aiCopyEmoji").checked = Boolean(item.allow_emoji);
+  $("aiCopySource").value = item.source_text || "";
+  $("aiCopyProject").value = item.pipeline_item_id || "";
+  if (item.model && [...$("aiCopyModel").options].some((option) => option.value === item.model)) {
+    $("aiCopyModel").value = item.model;
+  }
+  updateAiCopyProviderUi();
+  renderAiCopyCandidates(item.suggestions || []);
+  if (item.selected_text) $("aiCopySelectedResult").value = item.selected_text;
+  updateAiCopyResultActions();
+  setAiCopyStatus("已恢复历史记录", "success");
+}
+
+async function deleteAiCopyHistoryItem(id) {
+  await api("/api/remix/ai-copy/history/delete", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+  if (remixState.aiCopyHistoryId === id) remixState.aiCopyHistoryId = "";
+  await loadAiCopyHistory();
+  setAiCopyStatus("历史记录已删除");
+}
+
+function aiCopyProviderName(provider) {
+  return { lmstudio: "LM Studio", gemini: "Gemini 网页版", chatgpt: "ChatGPT 网页版" }[provider] || provider;
+}
+
+function aiCopyTaskName(task) {
+  return { title: "标题", body: "正文", tags: "标签", xiaohongshu: "小红书", douyin: "抖音" }[task] || task;
+}
+
 function writeResult(data) {
   console.debug("remix result", data);
 }
@@ -1548,6 +2190,31 @@ bind("aiPolishImagesBtn", async () => {
 });
 bind("affiliatePlanBtn", createAffiliatePlan);
 bind("affiliateJianyingBtn", createAffiliateJianyingPackage);
+bind("pipelineAddBtn", addPipelineLinks);
+bind("pipelineRefreshBtn", loadPipeline);
+bind("pipelineScoreBtn", scorePipelineProduct);
+bind("pipelineRewriteBtn", rewritePipelineItems);
+bind("pipelineSaveImagesBtn", savePipelineImages);
+bind("pipelineAuditBtn", auditPipelineItem);
+bind("aiCopyGenerateBtn", runAiCopy);
+bind("aiCopyCopyPromptBtn", () => openAiCopyWebProvider(aiCopyPayload(), false));
+bind("aiCopyParseBtn", parseAiCopyPastedResult);
+bind("aiCopyLoadProjectBtn", loadAiCopyProjectText);
+bind("aiCopyCopyResultBtn", async () => {
+  await navigator.clipboard.writeText($("aiCopySelectedResult").value.trim());
+  setAiCopyStatus("结果已复制", "success");
+});
+bind("aiCopyBackfillBtn", backfillAiCopyResult);
+bind("aiCopySaveHistoryBtn", saveAiCopyHistory);
+bind("aiCopyRefreshHistoryBtn", loadAiCopyHistory);
+$("aiCopyProvider").addEventListener("change", updateAiCopyProviderUi);
+$("aiCopyProject").addEventListener("change", updateAiCopyResultActions);
+$("aiCopySelectedResult").addEventListener("input", updateAiCopyResultActions);
+$("pipelineSearch").addEventListener("input", renderPipelineList);
+$("pipelineStatusFilter").addEventListener("change", renderPipelineList);
+document.querySelectorAll("[data-pipeline-step]").forEach((button) => {
+  button.addEventListener("click", () => setPipelineStep(button.dataset.pipelineStep));
+});
 $("imagePolishPrompt").addEventListener("input", updateImageActionState);
 $("imagePolishEngine").addEventListener("change", () => {
   const engine = $("imagePolishEngine").value;
@@ -1685,3 +2352,13 @@ loadPackageHistory().catch((error) => {
   if (list) list.textContent = `历史内容加载失败：${error.message}`;
   setRemixStatus("历史内容加载失败", "error");
 });
+
+loadPipeline().catch((error) => {
+  $("pipelineList").textContent = `素材池加载失败：${error.message}`;
+});
+
+loadAiCopyHistory().catch((error) => {
+  $("aiCopyHistoryList").textContent = `历史加载失败：${error.message}`;
+});
+
+updateAiCopyProviderUi();

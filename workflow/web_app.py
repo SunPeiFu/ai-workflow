@@ -19,7 +19,25 @@ from typing import Any, Dict, List
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from workflow.bgm_library import bgm_source_catalog, download_bgm_from_url
+from workflow.ai_copy import (
+    delete_ai_copy_history,
+    generate_ai_copy_with_lmstudio,
+    list_ai_copy_history,
+    open_web_ai_with_prompt,
+    parse_ai_copy_candidates,
+    save_ai_copy_history,
+    web_ai_copy_prompt,
+)
 from workflow.cli import align_project, audio_duration_seconds
+from workflow.content_pipeline import (
+    add_pool_links,
+    audit_pool_item,
+    batch_rewrite_items,
+    list_pool_items,
+    update_image_arrangement,
+    update_pool_item,
+    update_product_score,
+)
 from workflow.core import build_project
 from workflow.platforms import PLATFORM_PRESETS, TITLE_EXPERIMENT_COLUMNS, hook_analysis, monetization_plan, publish_schedule, series_plan
 from workflow.product_videos import is_product_payload, product_video_script, write_product_project_files
@@ -2951,6 +2969,12 @@ def _make_handler(root: Path):
             if path == "/api/remix/packages":
                 self._json(list_remix_packages(root))
                 return
+            if path == "/api/remix/pipeline":
+                self._json(list_pool_items(root))
+                return
+            if path == "/api/remix/ai-copy/history":
+                self._json(list_ai_copy_history(root))
+                return
             if path == "/api/remix/content/jianying-job":
                 job_id = parse_qs(parsed.query).get("id", [""])[0]
                 self._json(jianying_automation_job_status(job_id))
@@ -3021,6 +3045,82 @@ def _make_handler(root: Path):
                     return
                 if path == "/api/remix/images/polish-local":
                     self._json(polish_remix_images_locally(root, payload))
+                    return
+                if path == "/api/remix/pipeline/add":
+                    self._json(add_pool_links(root, str(payload.get("text") or "")))
+                    return
+                if path == "/api/remix/pipeline/update":
+                    self._json(
+                        {
+                            "ok": True,
+                            "item": update_pool_item(
+                                root,
+                                str(payload.get("id") or ""),
+                                payload.get("changes") or {},
+                            ),
+                        }
+                    )
+                    return
+                if path == "/api/remix/pipeline/product":
+                    self._json(
+                        update_product_score(
+                            root,
+                            str(payload.get("id") or ""),
+                            payload.get("product") or {},
+                        )
+                    )
+                    return
+                if path == "/api/remix/pipeline/rewrite":
+                    self._json(
+                        batch_rewrite_items(
+                            root,
+                            [str(item_id) for item_id in payload.get("ids") or []],
+                            str(payload.get("level") or "standard"),
+                        )
+                    )
+                    return
+                if path == "/api/remix/pipeline/images":
+                    self._json(
+                        {
+                            "ok": True,
+                            "item": update_image_arrangement(
+                                root,
+                                str(payload.get("id") or ""),
+                                payload.get("images") or [],
+                                payload.get("cover_image"),
+                            ),
+                        }
+                    )
+                    return
+                if path == "/api/remix/pipeline/audit":
+                    item_id = str(payload.get("id") or "")
+                    self._json({"ok": True, "id": item_id, "audit": audit_pool_item(root, item_id)})
+                    return
+                if path == "/api/remix/ai-copy/generate":
+                    self._json(generate_ai_copy_with_lmstudio(payload))
+                    return
+                if path == "/api/remix/ai-copy/web-prompt":
+                    self._json(web_ai_copy_prompt(payload))
+                    return
+                if path == "/api/remix/ai-copy/open-web":
+                    self._json(open_web_ai_with_prompt(payload))
+                    return
+                if path == "/api/remix/ai-copy/parse":
+                    self._json(
+                        {
+                            "ok": True,
+                            "suggestions": parse_ai_copy_candidates(
+                                str(payload.get("text") or ""),
+                                int(payload.get("candidate_count") or 3),
+                            ),
+                        }
+                    )
+                    return
+                if path == "/api/remix/ai-copy/history/save":
+                    self._json(save_ai_copy_history(root, payload))
+                    return
+                if path == "/api/remix/ai-copy/history/delete":
+                    self._json(delete_ai_copy_history(root, str(payload.get("id") or "")))
                     return
                 if path == "/api/remix/affiliate-plan":
                     self._json(create_affiliate_remix_plan(payload.get("analysis") or payload, payload))

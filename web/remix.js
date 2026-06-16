@@ -1928,36 +1928,19 @@ async function generateAiCopyLocally(payload) {
 
 async function openAiCopyWebProvider(payload = aiCopyPayload(), openPage = true) {
   if (!payload.text) throw new Error("请先输入原始文案");
-  const targetUrl = aiCopyProviderUrl(payload.provider);
-  const popup = openPage ? window.open(targetUrl, "_blank") : null;
   setAiCopyStatus("正在准备网页提示词", "busy");
   try {
-    const data = await api("/api/remix/ai-copy/web-prompt", {
+    const data = await api(openPage ? "/api/remix/ai-copy/open-web" : "/api/remix/ai-copy/web-prompt", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     remixState.aiCopyPrompt = data.prompt || "";
     await navigator.clipboard.writeText(data.prompt || "");
-    if (openPage) {
-      if (popup) {
-        if (data.url && data.url !== targetUrl) popup.location.href = data.url;
-      } else {
-        window.location.assign(data.url || targetUrl);
-        return;
-      }
-    }
-    setAiCopyStatus(openPage ? "提示词已复制，网页已打开" : "提示词已复制", "success");
+    setAiCopyStatus(openPage ? data.message || "网页已打开并尝试粘贴" : "提示词已复制", data.paste_attempted === false ? "warning" : "success");
   } catch (error) {
     setAiCopyStatus(error.message || "网页提示词生成失败", "error");
     throw error;
   }
-}
-
-function aiCopyProviderUrl(provider) {
-  return {
-    gemini: "https://gemini.google.com/app",
-    chatgpt: "https://chatgpt.com/",
-  }[provider] || "https://chatgpt.com/";
 }
 
 async function parseAiCopyPastedResult() {

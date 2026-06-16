@@ -23,6 +23,7 @@ from workflow.ai_copy import (
     delete_ai_copy_history,
     generate_ai_copy_with_lmstudio,
     list_ai_copy_history,
+    open_web_ai_with_prompt,
     parse_ai_copy_candidates,
     save_ai_copy_history,
     web_ai_copy_prompt,
@@ -3100,6 +3101,9 @@ def _make_handler(root: Path):
                     return
                 if path == "/api/remix/ai-copy/web-prompt":
                     self._json(web_ai_copy_prompt(payload))
+                    return
+                if path == "/api/remix/ai-copy/open-web":
+                    self._json(open_web_ai_with_prompt(payload))
                     return
                 if path == "/api/remix/ai-copy/parse":
                     self._json(

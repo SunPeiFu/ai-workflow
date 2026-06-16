@@ -172,6 +172,38 @@ def web_ai_copy_prompt(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "provider": provider, "url": PROVIDER_URLS[provider], "prompt": prompt}
 
 
+def open_web_ai_with_prompt(payload: dict[str, Any], run_osascript: bool = True) -> dict[str, Any]:
+    data = web_ai_copy_prompt(payload)
+    script = _web_ai_open_and_paste_applescript(data["url"], data["prompt"])
+    paste_attempted = False
+    error = ""
+    if run_osascript:
+        try:
+            result = subprocess.run(
+                ["osascript"],
+                input=script,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=20,
+            )
+            paste_attempted = result.returncode == 0
+            if result.returncode != 0:
+                error = (result.stderr or result.stdout or "").strip()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            error = str(exc)
+    return {
+        **data,
+        "paste_attempted": paste_attempted,
+        "automation_error": error,
+        "message": (
+            "已打开网页并尝试把提示词粘贴到输入框。"
+            if paste_attempted
+            else "已生成提示词；如果未自动粘贴，请在网页输入框按 Command+V。"
+        ),
+    }
+
+
 def list_ai_copy_history(root: Path) -> dict[str, Any]:
     items = _load_history(root)
     items.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
@@ -308,6 +340,24 @@ def _max_output_tokens(task: str, candidate_count: int) -> int:
         "douyin": 600,
     }.get(task, 700)
     return min(4500, 1800 + per_candidate * candidate_count)
+
+
+def _web_ai_open_and_paste_applescript(url: str, prompt: str) -> str:
+    escaped_url = _applescript_string(url)
+    escaped_prompt = _applescript_string(prompt)
+    return f"""set promptText to "{escaped_prompt}"
+set targetUrl to "{escaped_url}"
+set the clipboard to promptText
+open location targetUrl
+delay 3
+tell application "System Events"
+  keystroke "v" using command down
+end tell
+"""
+
+
+def _applescript_string(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "\\n")
 
 
 def _first_json_array(text: str) -> str:

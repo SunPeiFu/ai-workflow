@@ -10,6 +10,7 @@ from workflow.ai_copy import (
     delete_ai_copy_history,
     generate_ai_copy_with_lmstudio,
     list_ai_copy_history,
+    open_web_ai_with_prompt,
     parse_ai_copy_candidates,
     save_ai_copy_history,
     web_ai_copy_prompt,
@@ -116,6 +117,29 @@ class AiCopyTest(unittest.TestCase):
         self.assertIn("原文", gemini["prompt"])
         with self.assertRaises(ValueError):
             web_ai_copy_prompt({"provider": "unknown", "text": "原文"})
+
+    @patch("workflow.ai_copy.subprocess.run")
+    def test_open_web_ai_with_prompt_sets_clipboard_opens_url_and_pastes(self, run):
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        result = open_web_ai_with_prompt(
+            {
+                "provider": "gemini",
+                "text": "办公室杯子文案",
+                "task": "body",
+                "strength": "standard",
+            },
+            run_osascript=True,
+        )
+
+        command = run.call_args.args[0]
+        script = run.call_args.kwargs["input"]
+        self.assertEqual(command, ["osascript"])
+        self.assertIn("set the clipboard to", script)
+        self.assertIn("https://gemini.google.com/app", script)
+        self.assertIn('keystroke "v" using command down', script)
+        self.assertTrue(result["paste_attempted"])
+        self.assertEqual(result["url"], "https://gemini.google.com/app")
 
     def test_history_save_list_and_delete(self):
         with tempfile.TemporaryDirectory() as tmp:

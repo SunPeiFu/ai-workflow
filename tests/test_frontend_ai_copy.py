@@ -18,8 +18,8 @@ class FrontendAiCopyTest(unittest.TestCase):
 
         self.assertNotIn('window.open("about:blank"', function_body)
         self.assertNotIn("window.open('about:blank'", function_body)
-        self.assertIn("window.open(targetUrl", function_body)
-        self.assertIn("window.location.assign(data.url || targetUrl)", function_body)
+        self.assertIn('"/api/remix/ai-copy/open-web"', function_body)
+        self.assertNotIn("window.open(", function_body)
 
 
 if __name__ == "__main__":
